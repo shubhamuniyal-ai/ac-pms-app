@@ -1,29 +1,39 @@
 @echo off
 title AC PMS Launcher
 color 0A
-echo.
-echo  =============================================
-echo    AC PMS System — Starting
-echo  =============================================
-echo.
 
 cd /d "%~dp0"
 
+echo.
+echo  =============================================
+echo    AC PMS System — Starting...
+echo  =============================================
+echo.
+
+:: Kill any old instances
+taskkill /f /im streamlit.exe >nul 2>&1
+taskkill /f /im ssh.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
+
+:: Clean old url files
+del /f url.txt url_err.txt >nul 2>&1
+
 echo  [1/2] Starting Streamlit app...
-start "AC PMS - App" cmd /k "cd /d %~dp0 && streamlit run app.py"
+start "AC PMS - App" /min cmd /c "cd /d %~dp0 && streamlit run app.py"
+timeout /t 5 /nobreak >nul
 
-timeout /t 4 /nobreak >nul
+echo  [2/2] Getting your public URL...
+echo.
 
-echo  [2/2] Starting public internet tunnel...
-echo.
-start "AC PMS - Public URL" cmd /k "cd /d %~dp0 && python tunnel.py"
+:: Start tunnel in background, capture output
+start /b ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:8501 nokey@localhost.run > url.txt 2> url_err.txt
+
+:: Wait and extract URL then save to DB
+timeout /t 15 /nobreak >nul
+python get_url.py
 
 echo.
-echo  Two windows have opened:
-echo   - "AC PMS - App"        : the local Streamlit server
-echo   - "AC PMS - Public URL" : shows the internet URL for vendors
-echo.
-echo  Share the PUBLIC URL with vendors and users.
-echo  Keep both windows open while the app is in use.
+echo  Keep this window open while vendors use the app.
+echo  Close it to stop the app.
 echo.
 pause
