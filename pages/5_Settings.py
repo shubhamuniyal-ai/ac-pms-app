@@ -4,7 +4,6 @@ import os
 import pandas as pd
 import zipfile
 import io
-import sqlite3
 import qrcode
 from PIL import Image
 
@@ -12,8 +11,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from database import (
     init_db, get_stores, add_store, update_store, delete_store,
     get_ac_types, add_ac_type, delete_ac_type,
+    get_brands, add_brand, delete_brand,
     get_email_config, update_email_config, send_invite_email,
-    authenticate, DB_PATH, UPLOAD_DIR
+    authenticate, change_password, DB_PATH, UPLOAD_DIR
 )
 
 init_db()
@@ -42,9 +42,7 @@ def _change_password_section(key_prefix=""):
             if not authenticate(identifier, current):
                 st.error("Current password is incorrect.")
             else:
-                conn = sqlite3.connect(DB_PATH)
-                conn.execute("UPDATE users SET password=? WHERE id=?", (new_pwd, user['id']))
-                conn.commit(); conn.close()
+                change_password(user['id'], new_pwd)
                 st.success("Password updated successfully!")
 
 
@@ -163,9 +161,9 @@ if role != 'Admin':
     st.stop()
 
 # ── Admin only below this line ─────────────────────────────────────────────────
-tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab0, tab1, tab2, tab_brands, tab3, tab4, tab5 = st.tabs([
     "🔑 Change Password", "🏪 Store Master", "❄️ AC Types",
-    "📧 Email Config", "📱 Install on Mobile", "📦 App Download"
+    "🏷️ AC Brands", "📧 Email Config", "📱 Install on Mobile", "📦 App Download"
 ])
 
 with tab0:
@@ -274,6 +272,35 @@ with tab2:
                         st.rerun()
         else:
             st.info("No AC types defined.")
+
+
+# ── Tab Brands ────────────────────────────────────────────────────────────────
+with tab_brands:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Add Brand")
+        new_brand = st.text_input("Brand Name", placeholder="e.g. O General")
+        if st.button("Add Brand", type="primary"):
+            if new_brand.strip():
+                ok, msg = add_brand(new_brand.strip())
+                st.success(msg) if ok else st.error(msg)
+                if ok: st.rerun()
+            else:
+                st.warning("Brand name is required.")
+
+    with col2:
+        st.subheader("Current Brands")
+        brands = get_brands()
+        if brands:
+            for b in brands:
+                ca, cb = st.columns([5, 1])
+                with ca: st.write(f"🏷️  {b}")
+                with cb:
+                    if st.button("Delete", key=f"db_{b}"):
+                        delete_brand(b)
+                        st.rerun()
+        else:
+            st.info("No brands defined yet.")
 
 
 # ── Tab 3: Email Config + APK URL ─────────────────────────────────────────────

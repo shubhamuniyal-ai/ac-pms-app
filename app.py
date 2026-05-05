@@ -1,9 +1,13 @@
 import streamlit as st
 import sys
 import os
+from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from database import init_db, authenticate, verify_token, activate_account
+from database import (
+    init_db, authenticate, verify_token, activate_account,
+    create_session_token, verify_session_token
+)
 
 st.set_page_config(
     page_title="AC PMS System",
@@ -12,7 +16,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── PWA support (manifest + mobile meta tags) ──────────────────────────────────
 st.markdown("""
 <link rel="manifest" href="/_stcore/static/manifest.json">
 <meta name="mobile-web-app-capable" content="yes">
@@ -24,7 +27,6 @@ st.markdown("""
 
 init_db()
 
-# ── Shared CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     .main-header {
@@ -45,13 +47,36 @@ st.markdown("""
 # ── Session state init ─────────────────────────────────────────────────────────
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-    st.session_state.user = None
+    st.session_state.user      = None
+    st.session_state.login_date = None
+
+# ── Auto-login via session token in URL ───────────────────────────────────────
+if not st.session_state.logged_in:
+    s_token = st.query_params.get('s', '')
+    if s_token:
+        restored = verify_session_token(s_token)
+        if restored:
+            st.session_state.logged_in  = True
+            st.session_state.user       = restored
+            st.session_state.login_date = date.today().isoformat()
+
+# ── Midnight logout — session expires at end of day ───────────────────────────
+if st.session_state.logged_in:
+    today_str = date.today().isoformat()
+    if st.session_state.get('login_date') and st.session_state.login_date != today_str:
+        for k in list(st.session_state.keys()):
+            del st.session_state[k]
+        try:
+            st.query_params.clear()
+        except Exception:
+            pass
+        st.rerun()
 
 
 # ── Password setup flow (via invite link) ──────────────────────────────────────
 def password_setup_view():
     token = st.query_params.get('setup_token', '')
-    user = verify_token(token) if token else None
+    user  = verify_token(token) if token else None
 
     st.markdown('<div class="main-header">❄️ AC PMS System</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">Account Setup</div>', unsafe_allow_html=True)
@@ -67,7 +92,7 @@ def password_setup_view():
         st.markdown(f"Role: **{user['role']}**")
         st.markdown("---")
 
-        pwd = st.text_input("New Password", type="password", placeholder="Min 6 characters")
+        pwd  = st.text_input("New Password", type="password", placeholder="Min 6 characters")
         pwd2 = st.text_input("Confirm Password", type="password")
 
         if st.button("Activate Account & Set Password", type="primary", use_container_width=True):
@@ -93,14 +118,21 @@ def login_view():
     with col2:
         st.markdown("#### Login")
         identifier = st.text_input("Email / Mobile", placeholder="Enter your email or mobile number")
-        password = st.text_input("Password", type="password", placeholder="Enter your password")
+        password   = st.text_input("Password", type="password", placeholder="Enter your password")
 
         if st.button("Login", type="primary", use_container_width=True):
             if identifier and password:
                 user = authenticate(identifier, password)
                 if user:
-                    st.session_state.logged_in = True
-                    st.session_state.user = user
+                    st.session_state.logged_in  = True
+                    st.session_state.user       = user
+                    st.session_state.login_date = date.today().isoformat()
+                    # Create session token — persists session across WebSocket reconnects
+                    token = create_session_token(user['id'])
+                    try:
+                        st.query_params['s'] = token
+                    except Exception:
+                        pass
                     st.rerun()
                 else:
                     st.error("Invalid credentials or account inactive.")
@@ -125,12 +157,12 @@ if not st.session_state.logged_in:
 user = st.session_state.user
 role = user['role']
 
-pms_page     = st.Page("pages/1_PMS_Entry.py",   title="PMS Entry",    icon="📋")
-dash_page    = st.Page("pages/2_Dashboard.py",   title="Dashboard",    icon="📊")
-report_page  = st.Page("pages/3_Reports.py",     title="Reports",      icon="📑")
-users_page   = st.Page("pages/4_Create_User.py", title="Manage Users", icon="👤")
-settings_page= st.Page("pages/5_Settings.py",    title="Settings",     icon="⚙️")
-history_page = st.Page("pages/6_My_History.py",  title="My History",   icon="🕐")
+pms_page      = st.Page("pages/1_PMS_Entry.py",   title="PMS Entry",    icon="📋")
+dash_page     = st.Page("pages/2_Dashboard.py",   title="Dashboard",    icon="📊")
+report_page   = st.Page("pages/3_Reports.py",     title="Reports",      icon="📑")
+users_page    = st.Page("pages/4_Create_User.py", title="Manage Users", icon="👤")
+settings_page = st.Page("pages/5_Settings.py",    title="Settings",     icon="⚙️")
+history_page  = st.Page("pages/6_My_History.py",  title="My History",   icon="🕐")
 
 if role == 'Admin':
     nav = {
@@ -141,6 +173,7 @@ if role == 'Admin':
 elif role == 'Vendor':
     nav = {
         "Work":    [pms_page, history_page],
+        "View":    [dash_page],
         "Account": [settings_page],
     }
 else:  # Viewer
@@ -149,7 +182,6 @@ else:  # Viewer
         "Account":   [settings_page],
     }
 
-# ── Sidebar: user info + logout ────────────────────────────────────────────────
 badge_class = {'Admin': 'badge-admin', 'Vendor': 'badge-vendor', 'Viewer': 'badge-viewer'}.get(role, '')
 with st.sidebar:
     st.markdown(f"**{user['name']}**")
@@ -162,6 +194,10 @@ with st.sidebar:
     if st.button("Logout", use_container_width=True):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
+        try:
+            st.query_params.clear()
+        except Exception:
+            pass
         st.rerun()
     st.markdown("---")
 
