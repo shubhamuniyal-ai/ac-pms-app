@@ -119,6 +119,13 @@ def init_db():
             checklist_data TEXT DEFAULT '{{}}',
             created_at TEXT DEFAULT ({_NT()})
         );
+        CREATE TABLE IF NOT EXISTS pms_tasks (
+            id {_S()}, store_id INTEGER NOT NULL,
+            technician_id INTEGER,
+            month_year TEXT NOT NULL,
+            status TEXT DEFAULT 'Pending',
+            created_at TEXT DEFAULT ({_NT()})
+        );
         CREATE TABLE IF NOT EXISTS email_config (
             id INTEGER PRIMARY KEY, smtp_host TEXT DEFAULT 'smtp.gmail.com',
             smtp_port INTEGER DEFAULT 587, smtp_user TEXT DEFAULT '',
@@ -487,6 +494,9 @@ def create_pms_session(store_id, tech_id, ac_type, entry_date,
          json.dumps(final_remarks or {}))
     )
     conn.commit(); conn.close()
+    # Auto-mark matching monthly task as Done
+    month_year = entry_date[:7]  # "YYYY-MM"
+    auto_complete_task(store_id, month_year)
     return sid
 
 
@@ -703,6 +713,87 @@ def get_site_analysis(brand=None, tech_id=None, store_id=None, state=None, perio
     }
     conn.close()
     return result
+
+
+# ── Monthly Tasks ──────────────────────────────────────────────────────────────
+
+def generate_monthly_tasks(month_year, tech_id=None):
+    """Create one Pending task per store for the given month (skip duplicates)."""
+    conn   = get_conn()
+    stores = get_stores()
+    added  = 0
+    for s in stores:
+        existing = conn.execute(
+            "SELECT id FROM pms_tasks WHERE store_id=? AND month_year=?",
+            (s["id"], month_year)
+        ).fetchone()
+        if not existing:
+            conn.execute(
+                "INSERT INTO pms_tasks(store_id, technician_id, month_year, status) VALUES(?,?,?,?)",
+                (s["id"], tech_id, month_year, "Pending")
+            )
+            added += 1
+    conn.commit(); conn.close()
+    return added
+
+
+def get_monthly_tasks(month_year):
+    """Return task list with store info and session status for a given month."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT t.id, t.status, t.technician_id,
+               s.store_name, s.state, s.total_ac,
+               u.name as tech_name,
+               COUNT(ae.id) as ac_done,
+               MAX(ps.entry_date) as last_pms
+        FROM pms_tasks t
+        JOIN stores s ON t.store_id = s.id
+        LEFT JOIN users u ON t.technician_id = u.id
+        LEFT JOIN pms_sessions ps ON ps.store_id = s.id
+              AND ps.entry_date LIKE ?
+        LEFT JOIN ac_entries ae ON ae.session_id = ps.id
+        WHERE t.month_year = ?
+        GROUP BY t.id, t.status, t.technician_id,
+                 s.store_name, s.state, s.total_ac, u.name
+        ORDER BY t.status DESC, s.store_name
+    """, (f"{month_year}%", month_year)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_task_status(task_id, status):
+    conn = get_conn()
+    conn.execute("UPDATE pms_tasks SET status=? WHERE id=?", (status, task_id))
+    conn.commit(); conn.close()
+
+
+def auto_complete_task(store_id, month_year):
+    """Mark the task Done when a PMS session is submitted for that store+month."""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE pms_tasks SET status='Done' WHERE store_id=? AND month_year=? AND status='Pending'",
+        (store_id, month_year)
+    )
+    conn.commit(); conn.close()
+
+
+def delete_tasks_for_month(month_year):
+    conn = get_conn()
+    conn.execute("DELETE FROM pms_tasks WHERE month_year=?", (month_year,))
+    conn.commit(); conn.close()
+
+
+def clear_sessions_for_month(month_year):
+    """Delete all pms_sessions and ac_entries for a given month (YYYY-MM)."""
+    conn = get_conn()
+    session_ids = [dict(r)["id"] for r in conn.execute(
+        "SELECT id FROM pms_sessions WHERE entry_date LIKE ?", (f"{month_year}%",)
+    ).fetchall()]
+    for sid in session_ids:
+        conn.execute("DELETE FROM ac_entries WHERE session_id=?", (sid,))
+    conn.execute("DELETE FROM pms_sessions WHERE entry_date LIKE ?", (f"{month_year}%",))
+    conn.commit(); conn.close()
+    return len(session_ids)
 
 
 # ── Reports ────────────────────────────────────────────────────────────────────

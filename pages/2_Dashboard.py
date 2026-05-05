@@ -7,7 +7,9 @@ import plotly.express as px
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from database import (
     init_db, get_dashboard_data, get_vendor_dashboard_data, get_site_analysis,
-    get_users, get_stores, get_brands, get_states
+    get_users, get_stores, get_brands, get_states,
+    generate_monthly_tasks, get_monthly_tasks, update_task_status,
+    delete_tasks_for_month, clear_sessions_for_month
 )
 
 init_db()
@@ -78,7 +80,7 @@ if role == 'Vendor':
 # ══════════════════════════════════════════════════════════════════════════════
 # ADMIN / VIEWER DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
-tab_overview, tab_site = st.tabs(["🏢 Central Overview", "🔍 Site Analysis"])
+tab_overview, tab_tasks, tab_site = st.tabs(["🏢 Central Overview", "📋 Monthly Tasks", "🔍 Site Analysis"])
 
 # ── Tab 1: Central Overview ───────────────────────────────────────────────────
 with tab_overview:
@@ -175,7 +177,129 @@ with tab_overview:
         st.rerun()
 
 
-# ── Tab 2: Site Analysis ──────────────────────────────────────────────────────
+# ── Tab 2: Monthly Tasks ──────────────────────────────────────────────────────
+with tab_tasks:
+    from datetime import date as _date
+    import calendar as _cal
+
+    # Month selector
+    today     = _date.today()
+    months    = [(today.replace(day=1) - __import__('datetime').timedelta(days=30*i))
+                 for i in range(11, -1, -1)]
+    month_labels = [m.strftime("%B %Y") for m in months]
+    month_vals   = [m.strftime("%Y-%m") for m in months]
+    default_idx  = len(months) - 1  # current month
+
+    col_m, col_gen = st.columns([2, 1])
+    with col_m:
+        sel_idx    = st.selectbox("Month", range(len(month_labels)),
+                                  format_func=lambda i: month_labels[i],
+                                  index=default_idx, key="task_month_sel")
+        sel_month  = month_vals[sel_idx]
+        sel_label  = month_labels[sel_idx]
+
+    tasks = get_monthly_tasks(sel_month)
+
+    with col_gen:
+        st.write("")
+        st.write("")
+        if role == 'Admin':
+            if st.button("⚡ Generate Tasks", type="primary", use_container_width=True,
+                         help="Create Pending task for every store this month"):
+                added = generate_monthly_tasks(sel_month)
+                if added:
+                    st.success(f"Created {added} tasks for {sel_label}.")
+                else:
+                    st.info("Tasks already exist for this month.")
+                st.rerun()
+
+    if not tasks:
+        st.info(f"No tasks for {sel_label}. Click **Generate Tasks** to create them.")
+    else:
+        # KPIs
+        total  = len(tasks)
+        done   = sum(1 for t in tasks if t["status"] == "Done")
+        pct    = int(done / total * 100) if total else 0
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Total Stores",   total)
+        k2.metric("Done ✅",        done)
+        k3.metric("Pending ⏳",     total - done)
+        st.progress(pct / 100, text=f"{pct}% complete")
+        st.markdown("---")
+
+        # Task table with actions
+        st.markdown(f"#### Store Tasks — {sel_label}")
+        for t in tasks:
+            ac_done    = t.get("ac_done") or 0
+            total_ac   = t.get("total_ac") or 0
+            is_done    = t["status"] == "Done"
+            badge      = "✅ Done" if is_done else "⏳ Pending"
+            last_pms   = t.get("last_pms") or "—"
+
+            with st.expander(
+                f"{badge}  |  {t['store_name']}  ({t['state']})  —  {ac_done}/{total_ac} ACs",
+                expanded=not is_done
+            ):
+                c1, c2, c3 = st.columns(3)
+                c1.write(f"**Store:** {t['store_name']}")
+                c1.write(f"**State:** {t['state']}")
+                c2.write(f"**Total AC:** {total_ac}")
+                c2.write(f"**AC Done:** {ac_done}")
+                c3.write(f"**Last PMS:** {last_pms}")
+                c3.write(f"**Status:** {badge}")
+
+                if role == 'Admin':
+                    ca, cb = st.columns(2)
+                    with ca:
+                        if not is_done:
+                            if st.button("✅ Mark Done", key=f"done_{t['id']}",
+                                         use_container_width=True):
+                                update_task_status(t["id"], "Done")
+                                st.rerun()
+                    with cb:
+                        if is_done:
+                            if st.button("↩️ Mark Pending", key=f"pend_{t['id']}",
+                                         use_container_width=True):
+                                update_task_status(t["id"], "Pending")
+                                st.rerun()
+
+        st.markdown("---")
+
+        # ── Admin: Clear / Archive ─────────────────────────────────────────────
+        if role == 'Admin':
+            st.markdown("#### 🗑️ Data Management")
+            with st.expander("Clear / Archive Old Month Data", expanded=False):
+                st.warning(
+                    f"**Clearing month:** {sel_label}\n\n"
+                    "This will permanently delete all PMS sessions and AC entries for this month "
+                    "from the local database. Make sure the data is already in Google Sheets before clearing."
+                )
+                confirm = st.text_input(
+                    f'Type **{sel_month}** to confirm deletion',
+                    placeholder=sel_month, key="confirm_clear"
+                )
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("🗑️ Clear PMS Data for This Month", type="primary",
+                                 disabled=(confirm != sel_month)):
+                        deleted = clear_sessions_for_month(sel_month)
+                        delete_tasks_for_month(sel_month)
+                        st.success(
+                            f"Cleared {deleted} session(s) for {sel_label}. "
+                            "Tasks reset. Data is safe in Google Sheets."
+                        )
+                        st.rerun()
+                with c2:
+                    if st.button("🗑️ Clear Tasks Only", disabled=(confirm != sel_month)):
+                        delete_tasks_for_month(sel_month)
+                        st.success(f"Tasks cleared for {sel_label}.")
+                        st.rerun()
+
+    if st.button("🔄 Refresh", key="ref_tasks"):
+        st.rerun()
+
+
+# ── Tab 3: Site Analysis ──────────────────────────────────────────────────────
 with tab_site:
     st.markdown("#### Filters")
 
