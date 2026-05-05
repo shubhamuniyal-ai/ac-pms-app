@@ -20,6 +20,24 @@ if not user:
     st.stop()
 
 st.title("📋 PMS Entry")
+
+# ── Google Sheets required check ───────────────────────────────────────────────
+if not _sheets_ok():
+    st.error(
+        "⚠️ **Google Sheets not configured.**  "
+        "All PMS data is stored in Google Sheets. You must complete the setup before submitting entries."
+    )
+    st.markdown("""
+**Quick setup (5 minutes):**
+1. Go to **Settings → Google Sheets** tab
+2. Follow the steps to create a Service Account and download the JSON credentials file
+3. Upload the JSON file in Settings
+4. Share the Google Sheet with the service account email shown
+5. Come back here to submit PMS entries
+
+Your Google Sheet: [Open Sheet](https://docs.google.com/spreadsheets/d/1HIFQU7keY70wWiwlo7R_wT8nAB3UdOQM-tLPEQqowJE)
+    """)
+    st.stop()
 st.markdown("---")
 
 stores = get_accessible_stores(user['id'])
@@ -440,27 +458,26 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
             )
             st.balloons()
 
-            # Write to Google Sheet if configured
-            if _sheets_ok():
-                sess_info = {
-                    "date":       d_str,
-                    "store_name": selected_store,
-                    "state":      store_obj.get("state", ""),
-                    "tech_name":  tech_obj["name"],
-                    "brand":      selected_brand,
-                    "ac_type":    ac_type,
-                }
-                sheet_entries = [
-                    {"ac_number": ac_num, "serial_number": serial,
-                     "capacity": cap, "checklist": cl}
-                    for ac_num, serial, cap, _, _, _, cl in entries
-                ]
-                with st.spinner("Saving to Google Sheet..."):
-                    sh_ok, sh_msg = _sheets_append(sess_info, sheet_entries, final_remarks_data)
-                if sh_ok:
-                    st.info(f"📊 {sh_msg}")
-                else:
-                    st.warning(f"📊 Sheet not updated: {sh_msg}")
+            # Write to Google Sheet (primary data store)
+            sess_info = {
+                "date":       d_str,
+                "store_name": selected_store,
+                "state":      store_obj.get("state", ""),
+                "tech_name":  tech_obj["name"],
+                "brand":      selected_brand,
+                "ac_type":    ac_type,
+            }
+            sheet_entries = [
+                {"ac_number": ac_num, "serial_number": serial,
+                 "capacity": cap, "checklist": cl}
+                for ac_num, serial, cap, _, _, _, cl in entries
+            ]
+            with st.spinner("Saving to Google Sheet..."):
+                sh_ok, sh_msg = _sheets_append(sess_info, sheet_entries, final_remarks_data)
+            if sh_ok:
+                st.info(f"📊 {sh_msg}")
+            else:
+                st.error(f"📊 Google Sheet save failed: {sh_msg}")
 
             # Reset form
             st.session_state.ac_count = 1
