@@ -9,7 +9,7 @@ from database import (
     init_db, get_dashboard_data, get_vendor_dashboard_data, get_site_analysis,
     get_users, get_stores, get_brands, get_states,
     generate_monthly_tasks, get_monthly_tasks, update_task_status,
-    delete_tasks_for_month, clear_sessions_for_month
+    delete_tasks_for_month
 )
 
 init_db()
@@ -265,35 +265,14 @@ with tab_tasks:
 
         st.markdown("---")
 
-        # ── Admin: Clear / Archive ─────────────────────────────────────────────
+        # ── Admin: Reset task board only (PMS data is never deleted) ──────────
         if role == 'Admin':
-            st.markdown("#### 🗑️ Data Management")
-            with st.expander("Clear / Archive Old Month Data", expanded=False):
-                st.warning(
-                    f"**Clearing month:** {sel_label}\n\n"
-                    "This will permanently delete all PMS sessions and AC entries for this month "
-                    "from the local database. Make sure the data is already in Google Sheets before clearing."
-                )
-                confirm = st.text_input(
-                    f'Type **{sel_month}** to confirm deletion',
-                    placeholder=sel_month, key="confirm_clear"
-                )
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("🗑️ Clear PMS Data for This Month", type="primary",
-                                 disabled=(confirm != sel_month)):
-                        deleted = clear_sessions_for_month(sel_month)
-                        delete_tasks_for_month(sel_month)
-                        st.success(
-                            f"Cleared {deleted} session(s) for {sel_label}. "
-                            "Tasks reset. Data is safe in Google Sheets."
-                        )
-                        st.rerun()
-                with c2:
-                    if st.button("🗑️ Clear Tasks Only", disabled=(confirm != sel_month)):
-                        delete_tasks_for_month(sel_month)
-                        st.success(f"Tasks cleared for {sel_label}.")
-                        st.rerun()
+            st.markdown("#### ♻️ Reset Task Board")
+            st.info("PMS entry data is never deleted — it stays for analysis. This only resets the task checklist for the selected month so you can regenerate it.")
+            if st.button("♻️ Reset Tasks for This Month", key="reset_tasks"):
+                delete_tasks_for_month(sel_month)
+                st.success(f"Task board reset for {sel_label}. Click Generate Tasks to recreate.")
+                st.rerun()
 
     if st.button("🔄 Refresh", key="ref_tasks"):
         st.rerun()

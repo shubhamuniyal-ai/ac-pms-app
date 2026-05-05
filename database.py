@@ -783,18 +783,6 @@ def delete_tasks_for_month(month_year):
     conn.commit(); conn.close()
 
 
-def clear_sessions_for_month(month_year):
-    """Delete all pms_sessions and ac_entries for a given month (YYYY-MM)."""
-    conn = get_conn()
-    session_ids = [dict(r)["id"] for r in conn.execute(
-        "SELECT id FROM pms_sessions WHERE entry_date LIKE ?", (f"{month_year}%",)
-    ).fetchall()]
-    for sid in session_ids:
-        conn.execute("DELETE FROM ac_entries WHERE session_id=?", (sid,))
-    conn.execute("DELETE FROM pms_sessions WHERE entry_date LIKE ?", (f"{month_year}%",))
-    conn.commit(); conn.close()
-    return len(session_ids)
-
 
 # ── Reports ────────────────────────────────────────────────────────────────────
 
