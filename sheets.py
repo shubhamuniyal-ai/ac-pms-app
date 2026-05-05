@@ -1,30 +1,48 @@
 """
-Google Sheets — primary data store for ALL PMS app data.
+Google Sheets integration via Apps Script Web App.
+No API keys. No service account. Completely free.
 
-Sheet tabs used:
-  PMS_Log   — one row per AC entry (sessions + checklist)
-  Stores    — store master
-  Brands    — brand list
-  AC_Types  — AC type list
-
-Credentials priority:
-  1. st.secrets["gcp_service_account"]  (Streamlit Cloud)
-  2. data/sheets_creds.json             (uploaded via Settings)
+Setup (one time, 3 minutes):
+  1. Open the Google Sheet → Extensions → Apps Script
+  2. Paste the APPS_SCRIPT_CODE below into the editor → Save
+  3. Deploy → New deployment → Type: Web app
+     Execute as: Me  |  Who has access: Anyone
+  4. Copy the Web App URL → paste in Settings → Google Sheets
 """
-import json, os
-import streamlit as st
+import json, os, requests as _requests
 
-_BASE       = os.path.dirname(os.path.abspath(__file__))
-_DATA_DIR   = os.path.join(_BASE, "data")
-_CREDS_FILE = os.path.join(_DATA_DIR, "sheets_creds.json")
-_CFG_FILE   = os.path.join(_DATA_DIR, "sheets_config.json")
+_BASE     = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.path.join(_BASE, "data")
+_CFG_FILE = os.path.join(_DATA_DIR, "sheets_config.json")
 
-# ── Default sheet from the user's URL ─────────────────────────────────────────
 DEFAULT_SHEET_ID = "1HIFQU7keY70wWiwlo7R_wT8nAB3UdOQM-tLPEQqowJE"
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+# ── Apps Script to paste into the Google Sheet ─────────────────────────────────
+APPS_SCRIPT_CODE = """\
+function doPost(e) {
+  try {
+    var ss   = SpreadsheetApp.getActiveSpreadsheet();
+    var data = JSON.parse(e.postData.contents);
+    var tab  = data.tab || "PMS_Log";
+    var ws   = ss.getSheetByName(tab);
+    if (!ws) ws = ss.insertSheet(tab);
+    if (data.headers && ws.getLastRow() === 0)
+      ws.appendRow(data.headers);
+    (data.rows || []).forEach(function(r){ ws.appendRow(r); });
+    return ContentService
+      .createTextOutput(JSON.stringify({status:"ok", count:(data.rows||[]).length}))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({status:"error", message:err.toString()}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+function doGet(e) {
+  return ContentService.createTextOutput("AC PMS Web App is running ✅");
+}
+"""
 
-# ── Column headers for each tab ───────────────────────────────────────────────
 PMS_HEADERS = [
     "Date", "Store Name", "State", "Technician", "Brand", "AC Type",
     "AC Number", "Serial Number", "Capacity (Ton)",
@@ -43,7 +61,6 @@ PMS_HEADERS = [
 
 STORE_HEADERS  = ["Store Name", "State", "Total AC"]
 BRAND_HEADERS  = ["Brand Name"]
-ACTYPE_HEADERS = ["AC Type"]
 
 
 # ── Config helpers ─────────────────────────────────────────────────────────────
@@ -53,207 +70,127 @@ def get_config():
         with open(_CFG_FILE) as f:
             return json.load(f)
     except Exception:
-        return {"sheet_id": DEFAULT_SHEET_ID}
+        return {"sheet_id": DEFAULT_SHEET_ID, "webapp_url": ""}
 
 
-def save_config(sheet_id):
+def save_config(webapp_url, sheet_id=None):
     os.makedirs(_DATA_DIR, exist_ok=True)
+    cfg = get_config()
+    cfg["webapp_url"] = webapp_url.strip()
+    if sheet_id:
+        cfg["sheet_id"] = sheet_id.strip()
     with open(_CFG_FILE, "w") as f:
-        json.dump({"sheet_id": sheet_id}, f)
-
-
-def save_credentials(creds_dict):
-    os.makedirs(_DATA_DIR, exist_ok=True)
-    with open(_CREDS_FILE, "w") as f:
-        json.dump(creds_dict, f)
-
-
-def _load_creds_info():
-    try:
-        info = dict(st.secrets["gcp_service_account"])
-        if info:
-            return info
-    except Exception:
-        pass
-    if os.path.exists(_CREDS_FILE):
-        with open(_CREDS_FILE) as f:
-            return json.load(f)
-    return None
+        json.dump(cfg, f)
 
 
 def is_configured():
-    cfg = get_config()
-    return bool(cfg.get("sheet_id")) and (_load_creds_info() is not None)
+    return bool(get_config().get("webapp_url", ""))
 
 
-# ── Connection helpers ─────────────────────────────────────────────────────────
+# ── Core POST helper ──────────────────────────────────────────────────────────
 
-def _open_spreadsheet(sheet_id):
+def _post(tab, headers, rows):
+    url = get_config().get("webapp_url", "")
+    if not url:
+        return False, "Web App URL not set. Go to Settings → Google Sheets."
     try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-    except ImportError:
-        return None, "gspread not installed. Run: pip install gspread google-auth"
-
-    creds_info = _load_creds_info()
-    if not creds_info:
-        return None, (
-            "Google credentials not uploaded yet.\n"
-            "Go to Settings → Google Sheets → upload your service_account.json file."
+        resp = _requests.post(
+            url,
+            data=json.dumps({"tab": tab, "headers": headers, "rows": rows}),
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+            allow_redirects=True
         )
+        result = resp.json()
+        if result.get("status") == "ok":
+            return True, f"{result.get('count', len(rows))} row(s) saved."
+        return False, result.get("message", "Unknown error from Apps Script.")
+    except Exception as ex:
+        return False, f"Connection error: {ex}"
+
+
+def test_connection():
+    url = get_config().get("webapp_url", "")
+    if not url:
+        return False, "No Web App URL saved yet."
     try:
-        creds  = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-        client = gspread.authorize(creds)
-        sh     = client.open_by_key(sheet_id)
-        return sh, None
-    except Exception as e:
-        return None, f"Cannot open sheet: {e}"
+        resp = _requests.get(url, timeout=15, allow_redirects=True)
+        if resp.status_code == 200:
+            return True, f"Connected ✅  Response: {resp.text[:80]}"
+        return False, f"HTTP {resp.status_code}"
+    except Exception as ex:
+        return False, f"Connection error: {ex}"
 
 
-def _get_or_create_ws(sh, title, headers):
-    """Return worksheet with given title, creating it with headers if needed."""
-    try:
-        ws = sh.worksheet(title)
-    except Exception:
-        ws = sh.add_worksheet(title=title, rows=1000, cols=len(headers))
-    if not ws.row_values(1):
-        ws.append_row(headers, value_input_option="USER_ENTERED")
-    return ws
-
-
-def test_connection(sheet_id=None):
-    sheet_id = sheet_id or get_config().get("sheet_id", DEFAULT_SHEET_ID)
-    sh, err = _open_spreadsheet(sheet_id)
-    if err:
-        return False, err
-    try:
-        return True, f'Connected ✅  Sheet: "{sh.title}"'
-    except Exception as e:
-        return False, str(e)
-
-
-# ── PMS Data ───────────────────────────────────────────────────────────────────
+# ── PMS data ───────────────────────────────────────────────────────────────────
 
 def append_pms_data(session_info, entries, final_remarks):
-    """Write one row per AC entry to the PMS_Log tab."""
-    cfg      = get_config()
-    sheet_id = cfg.get("sheet_id", DEFAULT_SHEET_ID)
-    sh, err  = _open_spreadsheet(sheet_id)
-    if err:
-        return False, err
-
-    try:
-        ws = _get_or_create_ws(sh, "PMS_Log", PMS_HEADERS)
-        fr = final_remarks or {}
-        rows = []
-        for e in entries:
-            cl   = e.get("checklist", {})
-            idu  = cl.get("idu",         {})
-            odu  = cl.get("odu",         {})
-            elec = cl.get("electrical",  {})
-            gas  = cl.get("gas_cooling", {})
-            perf = cl.get("performance", {})
-            iss  = cl.get("issues",      {})
-            rem  = cl.get("remarks",     {})
-
-            def yn(v): return "Yes" if v else "No"
-
-            rows.append([
-                session_info.get("date", ""),
-                session_info.get("store_name", ""),
-                session_info.get("state", ""),
-                session_info.get("tech_name", ""),
-                session_info.get("brand", ""),
-                session_info.get("ac_type", ""),
-                e.get("ac_number", ""),
-                e.get("serial_number", ""),
-                e.get("capacity", ""),
-                yn(idu.get("air_filter_cleaned")),
-                yn(idu.get("drain_tray_cleaned")),
-                yn(idu.get("drain_pipe_flushed")),
-                yn(idu.get("evaporator_coil_cleaned")),
-                yn(idu.get("blower_cleaned")),
-                yn(idu.get("casing_wiped")),
-                yn(odu.get("condenser_coil_cleaned")),
-                yn(odu.get("fan_motor_ok")),
-                yn(odu.get("compressor_ok")),
-                yn(odu.get("casing_cleaned")),
-                yn(odu.get("pipes_ok")),
-                elec.get("supply_voltage",  0),
-                elec.get("running_current", 0),
-                yn(elec.get("capacitor_ok")),
-                yn(gas.get("gas_leak_checked")),
-                yn(gas.get("gas_topped_up")),
-                gas.get("gas_qty_grams", 0),
-                perf.get("inlet_temp",  0),
-                perf.get("outlet_temp", 0),
-                iss.get("issue_observed", ""),
-                iss.get("action_taken",   ""),
-                iss.get("parts_replaced", ""),
-                rem.get("overall_condition", ""),
-                rem.get("notes", ""),
-                fr.get("technician_remarks",  ""),
-                fr.get("customer_signature",  ""),
-                fr.get("customer_emp_code",   ""),
-                fr.get("feedback",            ""),
-                fr.get("complaint_pending",   ""),
-            ])
-
-        for row in rows:
-            ws.append_row(row, value_input_option="USER_ENTERED")
-
-        return True, f"{len(rows)} row(s) saved to Google Sheet (PMS_Log tab)."
-    except Exception as ex:
-        return False, f"Sheet write error: {ex}"
+    fr   = final_remarks or {}
+    rows = []
+    for e in entries:
+        cl   = e.get("checklist", {})
+        idu  = cl.get("idu",         {})
+        odu  = cl.get("odu",         {})
+        elec = cl.get("electrical",  {})
+        gas  = cl.get("gas_cooling", {})
+        perf = cl.get("performance", {})
+        iss  = cl.get("issues",      {})
+        rem  = cl.get("remarks",     {})
+        yn   = lambda v: "Yes" if v else "No"
+        rows.append([
+            session_info.get("date", ""),
+            session_info.get("store_name", ""),
+            session_info.get("state", ""),
+            session_info.get("tech_name", ""),
+            session_info.get("brand", ""),
+            session_info.get("ac_type", ""),
+            e.get("ac_number", ""),
+            e.get("serial_number", ""),
+            e.get("capacity", ""),
+            yn(idu.get("air_filter_cleaned")),
+            yn(idu.get("drain_tray_cleaned")),
+            yn(idu.get("drain_pipe_flushed")),
+            yn(idu.get("evaporator_coil_cleaned")),
+            yn(idu.get("blower_cleaned")),
+            yn(idu.get("casing_wiped")),
+            yn(odu.get("condenser_coil_cleaned")),
+            yn(odu.get("fan_motor_ok")),
+            yn(odu.get("compressor_ok")),
+            yn(odu.get("casing_cleaned")),
+            yn(odu.get("pipes_ok")),
+            elec.get("supply_voltage",  0),
+            elec.get("running_current", 0),
+            yn(elec.get("capacitor_ok")),
+            yn(gas.get("gas_leak_checked")),
+            yn(gas.get("gas_topped_up")),
+            gas.get("gas_qty_grams", 0),
+            perf.get("inlet_temp",  0),
+            perf.get("outlet_temp", 0),
+            iss.get("issue_observed", ""),
+            iss.get("action_taken",   ""),
+            iss.get("parts_replaced", ""),
+            rem.get("overall_condition", ""),
+            rem.get("notes", ""),
+            fr.get("technician_remarks",  ""),
+            fr.get("customer_signature",  ""),
+            fr.get("customer_emp_code",   ""),
+            fr.get("feedback",            ""),
+            fr.get("complaint_pending",   ""),
+        ])
+    return _post("PMS_Log", PMS_HEADERS, rows)
 
 
-# ── Store sync ─────────────────────────────────────────────────────────────────
+# ── Stores & Brands sync ───────────────────────────────────────────────────────
 
 def sync_stores(stores):
-    """Overwrite the Stores tab with current store list."""
-    cfg      = get_config()
-    sheet_id = cfg.get("sheet_id", DEFAULT_SHEET_ID)
-    sh, err  = _open_spreadsheet(sheet_id)
-    if err:
-        return False, err
-    try:
-        ws = _get_or_create_ws(sh, "Stores", STORE_HEADERS)
-        # Clear existing data (keep header)
-        ws.clear()
-        ws.append_row(STORE_HEADERS, value_input_option="USER_ENTERED")
-        for s in stores:
-            ws.append_row([s.get("store_name",""), s.get("state",""), s.get("total_ac",0)],
-                          value_input_option="USER_ENTERED")
-        return True, f"{len(stores)} stores synced to Google Sheet."
-    except Exception as ex:
-        return False, f"Store sync error: {ex}"
+    rows = [[s.get("store_name",""), s.get("state",""), s.get("total_ac",0)] for s in stores]
+    return _post("Stores", STORE_HEADERS, rows)
 
-
-# ── Brand sync ─────────────────────────────────────────────────────────────────
 
 def sync_brands(brands):
-    """Overwrite the Brands tab with current brand list."""
-    cfg      = get_config()
-    sheet_id = cfg.get("sheet_id", DEFAULT_SHEET_ID)
-    sh, err  = _open_spreadsheet(sheet_id)
-    if err:
-        return False, err
-    try:
-        ws = _get_or_create_ws(sh, "Brands", BRAND_HEADERS)
-        ws.clear()
-        ws.append_row(BRAND_HEADERS, value_input_option="USER_ENTERED")
-        for b in brands:
-            ws.append_row([b], value_input_option="USER_ENTERED")
-        return True, f"{len(brands)} brands synced to Google Sheet."
-    except Exception as ex:
-        return False, f"Brand sync error: {ex}"
+    rows = [[b] for b in brands]
+    return _post("Brands", BRAND_HEADERS, rows)
 
-
-# ── Full sync ──────────────────────────────────────────────────────────────────
 
 def sync_all(stores, brands):
-    """Sync stores and brands tabs. Returns list of (ok, msg) tuples."""
-    results = []
-    results.append(sync_stores(stores))
-    results.append(sync_brands(brands))
-    return results
+    return [sync_stores(stores), sync_brands(brands)]

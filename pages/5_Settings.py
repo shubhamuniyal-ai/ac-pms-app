@@ -310,8 +310,8 @@ with tab_sheets:
     _sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
     from sheets import (
         get_config as _sh_get_cfg, save_config as _sh_save_cfg,
-        save_credentials as _sh_save_creds, test_connection as _sh_test,
-        is_configured as _sh_ok, sync_all as _sh_sync_all,
+        test_connection as _sh_test, is_configured as _sh_ok,
+        sync_all as _sh_sync_all, APPS_SCRIPT_CODE,
         DEFAULT_SHEET_ID as _DEFAULT_SID
     )
 
@@ -319,88 +319,71 @@ with tab_sheets:
     _sh_active = _sh_ok()
 
     if _sh_active:
-        st.success("✅ Google Sheets is active — all PMS entries are saved directly to your sheet.")
+        st.success("✅ Google Sheets active — all PMS entries save directly to your sheet. Free.")
     else:
-        st.error("⚠️ Google Sheets is NOT configured. PMS Entry will be blocked until setup is complete.")
+        st.error("⚠️ Not configured yet. Follow the 3 steps below (takes ~3 minutes, completely free).")
 
     st.markdown(
-        f"**Your Sheet:** [Open Google Sheet](https://docs.google.com/spreadsheets/d/{_sh_cfg.get('sheet_id', _DEFAULT_SID)})",
-        unsafe_allow_html=False
+        f"📄 **Your Sheet:** [Open Google Sheet]"
+        f"(https://docs.google.com/spreadsheets/d/{_sh_cfg.get('sheet_id', _DEFAULT_SID)})"
     )
     st.markdown("---")
 
-    # ── Step 1: Sheet URL ──────────────────────────────────────────────────────
-    st.markdown("#### Step 1 — Google Sheet")
-    current_id = _sh_cfg.get("sheet_id", _DEFAULT_SID)
-    sheet_url  = st.text_input(
-        "Google Sheet URL",
-        value=f"https://docs.google.com/spreadsheets/d/{current_id}",
-        placeholder="https://docs.google.com/spreadsheets/d/..."
+    # ── Step 1 ─────────────────────────────────────────────────────────────────
+    st.markdown("### Step 1 — Add the script to your Google Sheet")
+    st.markdown(
+        "Open your **[Google Sheet](https://docs.google.com/spreadsheets/d/"
+        f"{_sh_cfg.get('sheet_id', _DEFAULT_SID)})** → "
+        "click **Extensions → Apps Script** → delete all existing code → paste this:"
     )
-    import re as _re
-    _m         = _re.search(r'/d/([a-zA-Z0-9_-]+)', sheet_url or "")
-    detected_id = _m.group(1) if _m else current_id
-
-    if st.button("💾 Save Sheet URL", disabled=not detected_id):
-        _sh_save_cfg(detected_id)
-        st.success("Sheet URL saved!")
-        st.rerun()
+    st.code(APPS_SCRIPT_CODE, language="javascript")
+    st.caption("Click 💾 Save in Apps Script after pasting.")
 
     st.markdown("---")
 
-    # ── Step 2: Credentials ────────────────────────────────────────────────────
-    st.markdown("#### Step 2 — Service Account Credentials (one-time setup)")
-    with st.expander("📖 How to get credentials — step by step (~5 minutes)", expanded=not _sh_active):
-        st.markdown("""
-**Do this once. After setup, all PMS data goes straight to your Google Sheet.**
-
-1. Open **[Google Cloud Console](https://console.cloud.google.com)** → sign in with Google
-2. Click **Select a project → New Project** → name it anything → Create
-3. Go to **APIs & Services → Library** → search **"Google Sheets API"** → click it → **Enable**
-4. Go to **APIs & Services → Credentials → + Create Credentials → Service Account**
-5. Enter any name (e.g. `pms-app`) → **Create and Continue → Done**
-6. Click the service account you just created → **Keys tab → Add Key → Create new key → JSON** → **Create**
-7. A `.json` file downloads to your computer
-8. Come back here and **upload that JSON file below** 👇
-9. Copy the **`client_email`** shown after upload (looks like `pms-app@project.iam.gserviceaccount.com`)
-10. Open your **[Google Sheet](https://docs.google.com/spreadsheets/d/1HIFQU7keY70wWiwlo7R_wT8nAB3UdOQM-tLPEQqowJE)** → click **Share** → paste that email → set **Editor** → Send
-        """)
-
-    uploaded_json = st.file_uploader(
-        "Upload your Service Account JSON file",
-        type=["json"],
-        help="Downloaded from Google Cloud Console → Credentials → Service Account → Keys"
-    )
-    if uploaded_json:
-        try:
-            creds_data = json.loads(uploaded_json.read())
-            if "client_email" not in creds_data:
-                st.error("This doesn't look like a valid service account JSON. Make sure you downloaded the JSON key file.")
-            else:
-                st.success(f"✅ Valid credentials for: `{creds_data['client_email']}`")
-                st.warning(
-                    f"📌 **Important:** Share your Google Sheet with this email as **Editor**:\n\n"
-                    f"`{creds_data['client_email']}`"
-                )
-                if st.button("💾 Save Credentials & Activate", type="primary"):
-                    _sh_save_creds(creds_data)
-                    st.success("Credentials saved! Google Sheets is now active.")
-                    st.rerun()
-        except Exception as e:
-            st.error(f"Could not read file: {e}")
+    # ── Step 2 ─────────────────────────────────────────────────────────────────
+    st.markdown("### Step 2 — Deploy as Web App")
+    st.markdown("""
+1. In Apps Script → click **Deploy → New deployment**
+2. Click ⚙️ gear icon next to "Select type" → choose **Web app**
+3. Set:
+   - **Execute as:** Me
+   - **Who has access:** Anyone
+4. Click **Deploy** → **Authorize access** → Allow
+5. Copy the **Web app URL** that appears (looks like `https://script.google.com/macros/s/...`)
+""")
 
     st.markdown("---")
 
-    # ── Test + Sync ────────────────────────────────────────────────────────────
-    st.markdown("#### Test & Sync")
+    # ── Step 3 ─────────────────────────────────────────────────────────────────
+    st.markdown("### Step 3 — Paste the Web App URL here")
+    current_url = _sh_cfg.get("webapp_url", "")
+    new_url = st.text_input(
+        "Web App URL",
+        value=current_url,
+        placeholder="https://script.google.com/macros/s/AKfy.../exec"
+    )
+
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🔗 Test Connection"):
-            with st.spinner("Connecting to Google Sheet..."):
-                ok, msg = _sh_test(detected_id)
-            st.success(msg) if ok else st.error(msg)
+        if st.button("💾 Save & Activate", type="primary", disabled=not new_url.strip()):
+            _sh_save_cfg(new_url.strip())
+            st.success("✅ Saved! Google Sheets is now active.")
+            st.rerun()
     with c2:
-        if st.button("🔄 Sync Stores & Brands to Sheet", disabled=not _sh_active):
+        if st.button("🔗 Test Connection"):
+            if not new_url.strip():
+                st.warning("Paste the Web App URL first.")
+            else:
+                _sh_save_cfg(new_url.strip())
+                with st.spinner("Testing..."):
+                    ok, msg = _sh_test()
+                st.success(msg) if ok else st.error(msg)
+
+    st.markdown("---")
+
+    if _sh_active:
+        if st.button("🔄 Sync Stores & Brands to Sheet"):
             from database import get_stores as _gst, get_brands as _gbr
             with st.spinner("Syncing..."):
                 results = _sh_sync_all(_gst(), _gbr())
