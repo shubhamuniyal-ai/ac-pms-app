@@ -10,6 +10,7 @@ from database import (
     get_ac_types, get_brands, create_pms_session, create_ac_entry,
     UPLOAD_DIR, TONNAGE_OPTIONS
 )
+from sheets import append_pms_data as _sheets_append, is_configured as _sheets_ok
 
 init_db()
 
@@ -438,6 +439,28 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
                 f"✅ PMS Entry submitted! **{len(entries)} AC(s)** recorded for **{selected_store}**."
             )
             st.balloons()
+
+            # Write to Google Sheet if configured
+            if _sheets_ok():
+                sess_info = {
+                    "date":       d_str,
+                    "store_name": selected_store,
+                    "state":      store_obj.get("state", ""),
+                    "tech_name":  tech_obj["name"],
+                    "brand":      selected_brand,
+                    "ac_type":    ac_type,
+                }
+                sheet_entries = [
+                    {"ac_number": ac_num, "serial_number": serial,
+                     "capacity": cap, "checklist": cl}
+                    for ac_num, serial, cap, _, _, _, cl in entries
+                ]
+                with st.spinner("Saving to Google Sheet..."):
+                    sh_ok, sh_msg = _sheets_append(sess_info, sheet_entries, final_remarks_data)
+                if sh_ok:
+                    st.info(f"📊 {sh_msg}")
+                else:
+                    st.warning(f"📊 Sheet not updated: {sh_msg}")
 
             # Reset form
             st.session_state.ac_count = 1

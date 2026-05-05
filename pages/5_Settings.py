@@ -1,6 +1,7 @@
 import streamlit as st
 import sys
 import os
+import json
 import pandas as pd
 import zipfile
 import io
@@ -161,9 +162,9 @@ if role != 'Admin':
     st.stop()
 
 # ── Admin only below this line ─────────────────────────────────────────────────
-tab0, tab1, tab2, tab_brands, tab3, tab4, tab5 = st.tabs([
+tab0, tab1, tab2, tab_brands, tab_sheets, tab3, tab4, tab5 = st.tabs([
     "🔑 Change Password", "🏪 Store Master", "❄️ AC Types",
-    "🏷️ AC Brands", "📧 Email Config", "📱 Install on Mobile", "📦 App Download"
+    "🏷️ AC Brands", "📊 Google Sheets", "📧 Email Config", "📱 Install on Mobile", "📦 App Download"
 ])
 
 with tab0:
@@ -301,6 +302,100 @@ with tab_brands:
                         st.rerun()
         else:
             st.info("No brands defined yet.")
+
+
+# ── Tab Google Sheets ─────────────────────────────────────────────────────────
+with tab_sheets:
+    import sys as _sys
+    _sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    from sheets import get_config as _sh_get_cfg, save_config as _sh_save_cfg, \
+                       save_credentials as _sh_save_creds, test_connection as _sh_test, \
+                       is_configured as _sh_ok
+
+    st.subheader("📊 Google Sheets — Auto-export PMS Data")
+    st.markdown(
+        "Every PMS submission will automatically write one row per AC into your Google Sheet. "
+        "No manual export needed."
+    )
+    st.markdown("---")
+
+    # ── Step 1: Sheet URL ──────────────────────────────────────────────────────
+    st.markdown("#### Step 1 — Google Sheet URL")
+    sh_cfg     = _sh_get_cfg()
+    current_id = sh_cfg.get("sheet_id", "")
+    sheet_url  = st.text_input(
+        "Paste your Google Sheet URL",
+        value=f"https://docs.google.com/spreadsheets/d/{current_id}" if current_id else "",
+        placeholder="https://docs.google.com/spreadsheets/d/..."
+    )
+    # Extract sheet ID from URL
+    import re as _re
+    _m = _re.search(r'/d/([a-zA-Z0-9_-]+)', sheet_url or "")
+    detected_id = _m.group(1) if _m else current_id
+
+    if detected_id:
+        st.caption(f"Sheet ID: `{detected_id}`")
+
+    st.markdown("---")
+
+    # ── Step 2: Credentials ────────────────────────────────────────────────────
+    st.markdown("#### Step 2 — Service Account Credentials")
+    with st.expander("📖 How to get credentials (one-time setup, ~5 minutes)", expanded=not _sh_ok()):
+        st.markdown("""
+1. Go to **[Google Cloud Console](https://console.cloud.google.com)**
+2. Create a project (or select an existing one)
+3. Click **"APIs & Services" → "Enable APIs"** → search **Google Sheets API** → Enable
+4. Click **"APIs & Services" → "Credentials" → "+ Create Credentials" → Service Account**
+5. Give it any name → Create → Done
+6. Click the service account → **"Keys" tab → Add Key → JSON** → Download the file
+7. Come back here and upload that JSON file below 👇
+8. **Copy the service account email** shown in the downloaded JSON (looks like `xxx@project.iam.gserviceaccount.com`)
+9. **Open your Google Sheet → Share → paste that email → give Editor access**
+        """)
+
+    uploaded_json = st.file_uploader(
+        "Upload Service Account JSON file",
+        type=["json"],
+        help="The credentials file downloaded from Google Cloud Console"
+    )
+    if uploaded_json:
+        try:
+            creds_data = json.loads(uploaded_json.read())
+            if "client_email" not in creds_data:
+                st.error("This doesn't look like a valid service account JSON.")
+            else:
+                st.success(f"✅ Loaded credentials for: `{creds_data['client_email']}`")
+                st.info(f"📌 Share your Google Sheet with this email (Editor access):\n\n`{creds_data['client_email']}`")
+                if st.button("💾 Save Credentials", type="primary"):
+                    _sh_save_creds(creds_data)
+                    st.success("Credentials saved!")
+                    st.rerun()
+        except Exception as e:
+            st.error(f"Could not read JSON: {e}")
+
+    st.markdown("---")
+
+    # ── Save + Test ────────────────────────────────────────────────────────────
+    col_save, col_test = st.columns(2)
+    with col_save:
+        if st.button("💾 Save Sheet Settings", type="primary", disabled=not detected_id):
+            _sh_save_cfg(detected_id)
+            st.success("Sheet ID saved!")
+            st.rerun()
+    with col_test:
+        if st.button("🔗 Test Connection"):
+            if not detected_id:
+                st.warning("Enter a sheet URL first.")
+            else:
+                with st.spinner("Connecting..."):
+                    ok, msg = _sh_test(detected_id)
+                st.success(msg) if ok else st.error(msg)
+
+    st.markdown("---")
+    if _sh_ok():
+        st.success("✅ Google Sheets integration is active — PMS data will auto-export on every submission.")
+    else:
+        st.warning("⚠️ Not fully configured yet. Complete Steps 1 & 2 above.")
 
 
 # ── Tab 3: Email Config + APK URL ─────────────────────────────────────────────
