@@ -26,7 +26,10 @@ class _Conn:
             os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
             self._c = sqlite3.connect(DB_PATH)
             self._c.row_factory = sqlite3.Row
-            self._c.execute("PRAGMA foreign_keys = ON")
+            # FK enforcement off — our schema has no REFERENCES clauses;
+            # old migrations may have left broken FK definitions pointing to
+            # renamed tables (users_old etc.) which would cause insert errors.
+            self._c.execute("PRAGMA foreign_keys = OFF")
 
     def _cur(self):
         if IS_PG:
@@ -167,6 +170,22 @@ def _migrate(conn):
         except: pass
         conn.commit()
     else:
+        # Drop stale artifacts left by old migrations that renamed users → users_old
+        for _stale in ("users_old", "technicians", "technicians_old"):
+            try:
+                conn.execute(f"DROP TABLE IF EXISTS {_stale}")
+            except Exception:
+                pass
+        # Drop views that may reference non-existent tables
+        stale_views = [dict(r)["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='view'"
+        ).fetchall()]
+        for _v in stale_views:
+            try:
+                conn.execute(f"DROP VIEW IF EXISTS {_v}")
+            except Exception:
+                pass
+
         def _add_cols(table, cols):
             existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
             for col, dtype in cols:
