@@ -266,12 +266,38 @@ with sp2:
         if f.type.startswith("image"):
             st.image(f, width=200)
 
-    st.file_uploader("FSR Report — Photo",
-                     type=['jpg','jpeg','png','webp','pdf'], key="sess_fsr_report")
-    if st.session_state.get("sess_fsr_report"):
-        f = st.session_state["sess_fsr_report"]
-        if f.type.startswith("image"):
-            st.image(f, width=200)
+st.markdown("---")
+
+# ── Final Remarks (mandatory — filled last) ────────────────────────────────────
+st.markdown("#### 🔹 Final Remarks")
+st.info("⚠️ All fields below are mandatory. Fill these after completing all AC entries and photos above.")
+
+fr1, fr2 = st.columns(2)
+with fr1:
+    st.text_area("Technician Remarks *", key="fr_tech_remarks",
+                 placeholder="Write your observations / service summary")
+    st.text_input("Customer Signature (Name) *", key="fr_cust_signature",
+                  placeholder="Customer representative name")
+with fr2:
+    st.text_input("Customer Emp Code *", key="fr_cust_empcode",
+                  placeholder="Employee / staff code of the customer")
+    st.text_area("Feedback *", key="fr_feedback",
+                 placeholder="Customer feedback about this service visit")
+
+st.text_area("Customer Complaint after Service & Pending Work *",
+             key="fr_complaint",
+             placeholder="List any complaints raised after service OR pending work to be done",
+             height=100)
+
+st.file_uploader("FSR Report — Upload Photo / PDF *",
+                 type=['jpg','jpeg','png','webp','pdf'], key="sess_fsr_report",
+                 help="Field Service Report document or photo")
+if st.session_state.get("sess_fsr_report"):
+    f = st.session_state["sess_fsr_report"]
+    if f.type.startswith("image"):
+        st.image(f, width=250)
+    else:
+        st.success(f"📄 {f.name} uploaded")
 
 st.markdown("---")
 
@@ -282,6 +308,27 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
 
     if not selected_brand:
         errors.append("Brand is required.")
+
+    # Final Remarks — all mandatory
+    fr_tech_remarks   = st.session_state.get("fr_tech_remarks",    "").strip()
+    fr_cust_signature = st.session_state.get("fr_cust_signature",  "").strip()
+    fr_cust_empcode   = st.session_state.get("fr_cust_empcode",    "").strip()
+    fr_feedback       = st.session_state.get("fr_feedback",        "").strip()
+    fr_complaint      = st.session_state.get("fr_complaint",       "").strip()
+    fr_fsr_file       = st.session_state.get("sess_fsr_report")
+
+    if not fr_tech_remarks:
+        errors.append("Final Remarks: Technician Remarks is required.")
+    if not fr_cust_signature:
+        errors.append("Final Remarks: Customer Signature (Name) is required.")
+    if not fr_cust_empcode:
+        errors.append("Final Remarks: Customer Emp Code is required.")
+    if not fr_feedback:
+        errors.append("Final Remarks: Feedback is required.")
+    if not fr_complaint:
+        errors.append("Final Remarks: Customer Complaint / Pending Work is required.")
+    if not fr_fsr_file:
+        errors.append("Final Remarks: FSR Report upload is required.")
 
     for i in range(st.session_state.ac_count):
         ac_num = st.session_state.get(f"ac_num_{i}", "").strip()
@@ -364,11 +411,20 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
             p_grill  = _save_sess(st.session_state.get("sess_grill_temp"),  "grill_temp")
             p_fsr    = _save_sess(st.session_state.get("sess_fsr_report"),  "fsr_report")
 
+            final_remarks_data = {
+                "technician_remarks":   fr_tech_remarks,
+                "customer_signature":   fr_cust_signature,
+                "customer_emp_code":    fr_cust_empcode,
+                "feedback":             fr_feedback,
+                "complaint_pending":    fr_complaint,
+            }
+
             session_id = create_pms_session(
                 store_obj['id'], tech_obj['id'], ac_type, d_str,
                 brand=selected_brand,
                 img_air_filter=p_air, img_drain_tray=p_drain,
-                img_grill_temp=p_grill, img_fsr_report=p_fsr
+                img_grill_temp=p_grill, img_fsr_report=p_fsr,
+                final_remarks=final_remarks_data
             )
 
             for ac_num, serial, cap, img_ac, img_sr, img_rd, checklist in entries:
@@ -395,7 +451,9 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
                           'issue_obs', 'issue_action', 'issue_parts',
                           'rem_condition', 'rem_notes']:
                     st.session_state.pop(f"{k}_{i}", None)
-            for k in ['sess_air_filter', 'sess_drain_tray', 'sess_grill_temp', 'sess_fsr_report']:
+            for k in ['sess_air_filter', 'sess_drain_tray', 'sess_grill_temp', 'sess_fsr_report',
+                      'fr_tech_remarks', 'fr_cust_signature', 'fr_cust_empcode',
+                      'fr_feedback', 'fr_complaint']:
                 st.session_state.pop(k, None)
 
         except Exception as e:

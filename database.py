@@ -104,6 +104,7 @@ def init_db():
             entry_date TEXT NOT NULL, status TEXT DEFAULT 'Completed',
             img_air_filter TEXT, img_drain_tray TEXT,
             img_grill_temp TEXT, img_fsr_report TEXT,
+            final_remarks TEXT DEFAULT '{{}}',
             created_at TEXT DEFAULT ({_NT()})
         );
         CREATE TABLE IF NOT EXISTS ac_entries (
@@ -147,7 +148,8 @@ def init_db():
 def _migrate(conn):
     """Add missing columns to existing tables (works for both SQLite and PG)."""
     ps_new = [("brand","TEXT DEFAULT ''"),("img_air_filter","TEXT"),
-              ("img_drain_tray","TEXT"),("img_grill_temp","TEXT"),("img_fsr_report","TEXT")]
+              ("img_drain_tray","TEXT"),("img_grill_temp","TEXT"),("img_fsr_report","TEXT"),
+              ("final_remarks","TEXT DEFAULT '{}'" )]
     ae_new = [("img_remote_display","TEXT"),("checklist_data","TEXT DEFAULT '{}'")]
     us_new = [("session_token","TEXT"),("session_expiry","TEXT")]
 
@@ -455,13 +457,15 @@ def delete_ac_type(type_name):
 def create_pms_session(store_id, tech_id, ac_type, entry_date,
                         brand="",
                         img_air_filter=None, img_drain_tray=None,
-                        img_grill_temp=None, img_fsr_report=None):
+                        img_grill_temp=None, img_fsr_report=None,
+                        final_remarks=None):
     conn = get_conn()
     sid = conn.insert_returning_id(
         "INSERT INTO pms_sessions(store_id,technician_id,ac_type,brand,entry_date,"
-        "img_air_filter,img_drain_tray,img_grill_temp,img_fsr_report) VALUES(?,?,?,?,?,?,?,?,?)",
+        "img_air_filter,img_drain_tray,img_grill_temp,img_fsr_report,final_remarks) VALUES(?,?,?,?,?,?,?,?,?,?)",
         (store_id, tech_id, ac_type, brand, entry_date,
-         img_air_filter, img_drain_tray, img_grill_temp, img_fsr_report)
+         img_air_filter, img_drain_tray, img_grill_temp, img_fsr_report,
+         json.dumps(final_remarks or {}))
     )
     conn.commit(); conn.close()
     return sid
