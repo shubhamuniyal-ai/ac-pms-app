@@ -1,0 +1,10 @@
+import sqlite3, shutil
+total, used, free = shutil.disk_usage("C:\\")
+print(f"Total: {total//1073741824} GB")
+print(f"Used:  {used//1073741824} GB")
+print(f"Free:  {free//1073741824} GB")
+conn = sqlite3.connect("data/pms.db")
+conn.execute("UPDATE email_config SET app_url=? WHERE id=1", ("https://xl2v0b7q-8501.inc1.devtunnels.ms",))
+conn.commit()
+conn.close()
+print("App URL updated!")
