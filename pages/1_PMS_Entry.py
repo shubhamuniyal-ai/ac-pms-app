@@ -114,6 +114,32 @@ def _remove_ac():
         st.session_state.ac_count -= 1
 
 
+def _photo_field(label, key, allow_video=False):
+    """Two-tab widget: camera capture OR file upload. Keys: cam_{key} / up_{key}."""
+    st.markdown(f"**{label}**")
+    t_cam, t_up = st.tabs(["📷 Take Photo", "📁 Upload File"])
+    with t_cam:
+        st.camera_input("", key=f"cam_{key}", label_visibility="collapsed")
+        if st.session_state.get(f"cam_{key}"):
+            st.image(st.session_state[f"cam_{key}"], width=180)
+    with t_up:
+        types = ['jpg', 'jpeg', 'png', 'webp']
+        if allow_video:
+            types += ['mp4', 'mov', 'pdf']
+        st.file_uploader("", type=types, key=f"up_{key}", label_visibility="collapsed")
+        f = st.session_state.get(f"up_{key}")
+        if f:
+            if hasattr(f, 'type') and f.type.startswith('image'):
+                st.image(f, width=180)
+            else:
+                st.success(f"✅ {f.name}")
+
+
+def _get_photo(key):
+    """Return camera file if taken, else uploaded file."""
+    return st.session_state.get(f"cam_{key}") or st.session_state.get(f"up_{key}")
+
+
 def save_image(file_obj, store, d, label, suffix):
     if file_obj is None:
         return None
@@ -148,20 +174,11 @@ for i in range(st.session_state.ac_count):
         st.markdown("**Photos**")
         pc1, pc2, pc3 = st.columns(3)
         with pc1:
-            st.file_uploader("AC Number Photo", type=['jpg','jpeg','png','webp'],
-                             key=f"img_ac_{i}", help="Tap to use camera on mobile")
-            if st.session_state.get(f"img_ac_{i}"):
-                st.image(st.session_state[f"img_ac_{i}"], width=160)
+            _photo_field("AC Number Photo", f"img_ac_{i}")
         with pc2:
-            st.file_uploader("Serial Number Photo", type=['jpg','jpeg','png','webp'],
-                             key=f"img_serial_{i}")
-            if st.session_state.get(f"img_serial_{i}"):
-                st.image(st.session_state[f"img_serial_{i}"], width=160)
+            _photo_field("Serial Number Photo", f"img_serial_{i}")
         with pc3:
-            st.file_uploader("Remote Display Photo", type=['jpg','jpeg','png','webp'],
-                             key=f"img_remote_{i}")
-            if st.session_state.get(f"img_remote_{i}"):
-                st.image(st.session_state[f"img_remote_{i}"], width=160)
+            _photo_field("Remote Display Photo", f"img_remote_{i}")
 
         st.markdown("---")
 
@@ -265,25 +282,12 @@ st.caption("Upload one photo/video per category — applies to the whole visit."
 
 sp1, sp2 = st.columns(2)
 with sp1:
-    st.file_uploader("Air Filter Cleaned — Photo",
-                     type=['jpg','jpeg','png','webp'], key="sess_air_filter",
-                     help="One photo showing cleaned air filter(s)")
-    if st.session_state.get("sess_air_filter"):
-        st.image(st.session_state["sess_air_filter"], width=200)
-
-    st.file_uploader("Drain Tray Cleaned — Photo",
-                     type=['jpg','jpeg','png','webp'], key="sess_drain_tray")
-    if st.session_state.get("sess_drain_tray"):
-        st.image(st.session_state["sess_drain_tray"], width=200)
+    _photo_field("Air Filter Cleaned", "sess_air_filter")
+    st.write("")
+    _photo_field("Drain Tray Cleaned", "sess_drain_tray")
 
 with sp2:
-    st.file_uploader("Grill Temp — Photo / Video",
-                     type=['jpg','jpeg','png','webp','mp4','mov'], key="sess_grill_temp",
-                     help="Temperature gun reading or thermal image")
-    if st.session_state.get("sess_grill_temp"):
-        f = st.session_state["sess_grill_temp"]
-        if f.type.startswith("image"):
-            st.image(f, width=200)
+    _photo_field("Grill Temp °C — Photo / Video", "sess_grill_temp", allow_video=True)
 
 st.markdown("---")
 
@@ -308,15 +312,7 @@ st.text_area("Customer Complaint after Service & Pending Work *",
              placeholder="List any complaints raised after service OR pending work to be done",
              height=100)
 
-st.file_uploader("FSR Report — Upload Photo / PDF *",
-                 type=['jpg','jpeg','png','webp','pdf'], key="sess_fsr_report",
-                 help="Field Service Report document or photo")
-if st.session_state.get("sess_fsr_report"):
-    f = st.session_state["sess_fsr_report"]
-    if f.type.startswith("image"):
-        st.image(f, width=250)
-    else:
-        st.success(f"📄 {f.name} uploaded")
+_photo_field("FSR Report — Photo / PDF *", "sess_fsr_report", allow_video=True)
 
 st.markdown("---")
 
@@ -334,7 +330,7 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
     fr_cust_empcode   = st.session_state.get("fr_cust_empcode",    "").strip()
     fr_feedback       = st.session_state.get("fr_feedback",        "").strip()
     fr_complaint      = st.session_state.get("fr_complaint",       "").strip()
-    fr_fsr_file       = st.session_state.get("sess_fsr_report")
+    fr_fsr_file       = _get_photo("sess_fsr_report")
 
     if not fr_tech_remarks:
         errors.append("Final Remarks: Technician Remarks is required.")
@@ -399,9 +395,9 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
                 },
             }
             entries.append((ac_num, serial, cap,
-                            st.session_state.get(f"img_ac_{i}"),
-                            st.session_state.get(f"img_serial_{i}"),
-                            st.session_state.get(f"img_remote_{i}"),
+                            _get_photo(f"img_ac_{i}"),
+                            _get_photo(f"img_serial_{i}"),
+                            _get_photo(f"img_remote_{i}"),
                             checklist))
 
     if errors:
@@ -425,10 +421,10 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
                     f.write(file_obj.getbuffer())
                 return path
 
-            p_air    = _save_sess(st.session_state.get("sess_air_filter"),  "air_filter")
-            p_drain  = _save_sess(st.session_state.get("sess_drain_tray"),  "drain_tray")
-            p_grill  = _save_sess(st.session_state.get("sess_grill_temp"),  "grill_temp")
-            p_fsr    = _save_sess(st.session_state.get("sess_fsr_report"),  "fsr_report")
+            p_air    = _save_sess(_get_photo("sess_air_filter"),  "air_filter")
+            p_drain  = _save_sess(_get_photo("sess_drain_tray"),  "drain_tray")
+            p_grill  = _save_sess(_get_photo("sess_grill_temp"),  "grill_temp")
+            p_fsr    = _save_sess(_get_photo("sess_fsr_report"),  "fsr_report")
 
             final_remarks_data = {
                 "technician_remarks":   fr_tech_remarks,
@@ -481,18 +477,25 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
 
             # Reset form
             st.session_state.ac_count = 1
-            for i in range(50):
-                for k in ['ac_num', 'serial', 'cap', 'img_ac', 'img_serial', 'img_remote',
+            photo_keys = ['img_ac', 'img_serial', 'img_remote']
+            other_keys = ['ac_num', 'serial', 'cap',
                           'idu_filter', 'idu_drain', 'idu_pipe', 'idu_coil', 'idu_blower', 'idu_casing',
                           'odu_condenser', 'odu_fan', 'odu_comp', 'odu_casing', 'odu_pipes',
                           'elec_voltage', 'elec_current', 'elec_cap',
                           'gas_check', 'gas_topup', 'gas_qty',
                           'perf_inlet', 'perf_outlet',
                           'issue_obs', 'issue_action', 'issue_parts',
-                          'rem_condition', 'rem_notes']:
+                          'rem_condition', 'rem_notes']
+            for i in range(50):
+                for k in other_keys:
                     st.session_state.pop(f"{k}_{i}", None)
-            for k in ['sess_air_filter', 'sess_drain_tray', 'sess_grill_temp', 'sess_fsr_report',
-                      'fr_tech_remarks', 'fr_cust_signature', 'fr_cust_empcode',
+                for k in photo_keys:
+                    st.session_state.pop(f"cam_{k}_{i}", None)
+                    st.session_state.pop(f"up_{k}_{i}", None)
+            for k in ['sess_air_filter', 'sess_drain_tray', 'sess_grill_temp', 'sess_fsr_report']:
+                st.session_state.pop(f"cam_{k}", None)
+                st.session_state.pop(f"up_{k}", None)
+            for k in ['fr_tech_remarks', 'fr_cust_signature', 'fr_cust_empcode',
                       'fr_feedback', 'fr_complaint']:
                 st.session_state.pop(k, None)
 
