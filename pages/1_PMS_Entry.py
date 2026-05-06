@@ -101,7 +101,7 @@ def _add_ac():
 def _remove_ac():
     if st.session_state.ac_count > 1:
         idx = st.session_state.ac_count - 1
-        keys = ['ac_num', 'serial', 'cap', 'img_ac', 'img_serial', 'img_remote',
+        keys = ['ac_num', 'serial', 'cap',
                 'idu_filter', 'idu_drain', 'idu_pipe', 'idu_coil', 'idu_blower', 'idu_casing',
                 'odu_condenser', 'odu_fan', 'odu_comp', 'odu_casing', 'odu_pipes',
                 'elec_voltage', 'elec_current', 'elec_cap',
@@ -111,17 +111,56 @@ def _remove_ac():
                 'rem_condition', 'rem_notes']
         for k in keys:
             st.session_state.pop(f"{k}_{idx}", None)
+        for photo_base in ['img_ac', 'img_serial', 'img_remote']:
+            pk = f"{photo_base}_{idx}"
+            for pfx in ['cam_confirmed_', 'cam_active_', 'cam_counter_', 'up_']:
+                st.session_state.pop(f"{pfx}{pk}", None)
         st.session_state.ac_count -= 1
 
 
 def _photo_field(label, key, allow_video=False):
-    """Two-tab widget: camera capture OR file upload. Keys: cam_{key} / up_{key}."""
+    """Photo field: Open Camera → take photo → Retake or OK to save. Also supports file upload."""
     st.markdown(f"**{label}**")
+
+    confirmed_key = f"cam_confirmed_{key}"
+    active_key    = f"cam_active_{key}"
+    counter_key   = f"cam_counter_{key}"
+    if counter_key not in st.session_state:
+        st.session_state[counter_key] = 0
+
     t_cam, t_up = st.tabs(["📷 Take Photo", "📁 Upload File"])
+
     with t_cam:
-        st.camera_input("", key=f"cam_{key}", label_visibility="collapsed")
-        if st.session_state.get(f"cam_{key}"):
-            st.image(st.session_state[f"cam_{key}"], width=180)
+        confirmed = st.session_state.get(confirmed_key)
+        active    = st.session_state.get(active_key, False)
+
+        if confirmed:
+            st.image(confirmed, width=200)
+            if st.button("🔄 Retake", key=f"retake_{key}", use_container_width=True):
+                st.session_state[confirmed_key] = None
+                st.session_state[active_key]    = True
+                st.session_state[counter_key]  += 1
+                st.rerun()
+        elif active:
+            photo = st.camera_input("", key=f"cam_{key}_{st.session_state[counter_key]}",
+                                    label_visibility="collapsed")
+            if photo:
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("🔄 Retake", key=f"retake_live_{key}", use_container_width=True):
+                        st.session_state[counter_key] += 1
+                        st.rerun()
+                with c2:
+                    if st.button("✅ OK — Save Photo", key=f"ok_{key}",
+                                 type="primary", use_container_width=True):
+                        st.session_state[confirmed_key] = photo
+                        st.session_state[active_key]    = False
+                        st.rerun()
+        else:
+            if st.button("📷 Open Camera", key=f"open_cam_{key}", use_container_width=True):
+                st.session_state[active_key] = True
+                st.rerun()
+
     with t_up:
         types = ['jpg', 'jpeg', 'png', 'webp']
         if allow_video:
@@ -136,8 +175,8 @@ def _photo_field(label, key, allow_video=False):
 
 
 def _get_photo(key):
-    """Return camera file if taken, else uploaded file."""
-    return st.session_state.get(f"cam_{key}") or st.session_state.get(f"up_{key}")
+    """Return confirmed camera photo or uploaded file."""
+    return st.session_state.get(f"cam_confirmed_{key}") or st.session_state.get(f"up_{key}")
 
 
 def save_image(file_obj, store, d, label, suffix):
@@ -490,11 +529,12 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
                 for k in other_keys:
                     st.session_state.pop(f"{k}_{i}", None)
                 for k in photo_keys:
-                    st.session_state.pop(f"cam_{k}_{i}", None)
-                    st.session_state.pop(f"up_{k}_{i}", None)
+                    pk = f"{k}_{i}"
+                    for pfx in ['cam_confirmed_', 'cam_active_', 'cam_counter_', 'up_']:
+                        st.session_state.pop(f"{pfx}{pk}", None)
             for k in ['sess_air_filter', 'sess_drain_tray', 'sess_grill_temp', 'sess_fsr_report']:
-                st.session_state.pop(f"cam_{k}", None)
-                st.session_state.pop(f"up_{k}", None)
+                for pfx in ['cam_confirmed_', 'cam_active_', 'cam_counter_', 'up_']:
+                    st.session_state.pop(f"{pfx}{k}", None)
             for k in ['fr_tech_remarks', 'fr_cust_signature', 'fr_cust_empcode',
                       'fr_feedback', 'fr_complaint']:
                 st.session_state.pop(k, None)
