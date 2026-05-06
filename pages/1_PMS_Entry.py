@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as _comp
 import sys
 import os
 import json
@@ -39,6 +40,38 @@ Your Google Sheet: [Open Sheet](https://docs.google.com/spreadsheets/d/1HIFQU7ke
     """)
     st.stop()
 st.markdown("---")
+
+# Inject JS once — adds capture=environment to file inputs inside "Take Photo" tabs
+# so tapping them opens the native full-screen camera app on mobile
+_comp.html("""
+<script>
+(function() {
+    if (window.parent.__pmsCamCapture) return;
+    window.parent.__pmsCamCapture = true;
+    function applyCapture() {
+        try {
+            var doc = window.parent.document;
+            doc.querySelectorAll('[data-baseweb="tab-panel"]').forEach(function(panel) {
+                var labelId = panel.getAttribute('aria-labelledby');
+                if (!labelId) return;
+                var btn = doc.getElementById(labelId);
+                if (!btn) return;
+                var txt = btn.innerText || btn.textContent || '';
+                if (txt.indexOf('Take Photo') === -1) return;
+                panel.querySelectorAll('input[type="file"]').forEach(function(inp) {
+                    inp.setAttribute('capture', 'environment');
+                });
+            });
+        } catch(e) {}
+    }
+    applyCapture();
+    new MutationObserver(applyCapture).observe(
+        window.parent.document.body,
+        {childList: true, subtree: true}
+    );
+})();
+</script>
+""", height=0, scrolling=False)
 
 stores = get_accessible_stores(user['id'])
 store_names = [s['store_name'] for s in stores]
@@ -119,11 +152,11 @@ def _remove_ac():
 
 
 def _photo_field(label, key, allow_video=False):
-    """Photo field: Open Camera → take photo → Retake or OK to save. Also supports file upload."""
+    """Take Photo tab: tapping opens native full-screen camera app on mobile (via capture=environment).
+       Upload File tab: pick existing photo/video from gallery."""
     st.markdown(f"**{label}**")
 
     confirmed_key = f"cam_confirmed_{key}"
-    active_key    = f"cam_active_{key}"
     counter_key   = f"cam_counter_{key}"
     if counter_key not in st.session_state:
         st.session_state[counter_key] = 0
@@ -132,19 +165,22 @@ def _photo_field(label, key, allow_video=False):
 
     with t_cam:
         confirmed = st.session_state.get(confirmed_key)
-        active    = st.session_state.get(active_key, False)
 
         if confirmed:
-            st.image(confirmed, width=200)
+            st.image(confirmed, width=220)
             if st.button("🔄 Retake", key=f"retake_{key}", use_container_width=True):
                 st.session_state[confirmed_key] = None
-                st.session_state[active_key]    = True
                 st.session_state[counter_key]  += 1
                 st.rerun()
-        elif active:
-            photo = st.camera_input("", key=f"cam_{key}_{st.session_state[counter_key]}",
-                                    label_visibility="collapsed")
-            if photo:
+        else:
+            # JS adds capture=environment to this input → opens native camera app on mobile
+            cam_file = st.file_uploader(
+                "📷 Tap here to open camera",
+                type=['jpg', 'jpeg', 'png', 'webp'],
+                key=f"cam_{key}_{st.session_state[counter_key]}",
+            )
+            if cam_file:
+                st.image(cam_file, width=220)
                 c1, c2 = st.columns(2)
                 with c1:
                     if st.button("🔄 Retake", key=f"retake_live_{key}", use_container_width=True):
@@ -153,13 +189,8 @@ def _photo_field(label, key, allow_video=False):
                 with c2:
                     if st.button("✅ OK — Save Photo", key=f"ok_{key}",
                                  type="primary", use_container_width=True):
-                        st.session_state[confirmed_key] = photo
-                        st.session_state[active_key]    = False
+                        st.session_state[confirmed_key] = cam_file
                         st.rerun()
-        else:
-            if st.button("📷 Open Camera", key=f"open_cam_{key}", use_container_width=True):
-                st.session_state[active_key] = True
-                st.rerun()
 
     with t_up:
         types = ['jpg', 'jpeg', 'png', 'webp']
