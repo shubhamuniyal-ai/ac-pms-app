@@ -41,37 +41,48 @@ Your Google Sheet: [Open Sheet](https://docs.google.com/spreadsheets/d/1HIFQU7ke
     st.stop()
 st.markdown("---")
 
-# Inject JS once — adds capture=environment to file inputs inside "Take Photo" tabs
-# so tapping them opens the native full-screen camera app on mobile
+# JS: add capture=environment to file inputs whose label contains "open camera"
 _comp.html("""
 <script>
 (function() {
-    if (window.parent.__pmsCamCapture) return;
-    window.parent.__pmsCamCapture = true;
+    if (window.parent.__pmsCam2) return;
+    window.parent.__pmsCam2 = true;
     function applyCapture() {
         try {
             var doc = window.parent.document;
-            doc.querySelectorAll('[data-baseweb="tab-panel"]').forEach(function(panel) {
-                var labelId = panel.getAttribute('aria-labelledby');
-                if (!labelId) return;
-                var btn = doc.getElementById(labelId);
-                if (!btn) return;
-                var txt = btn.innerText || btn.textContent || '';
-                if (txt.indexOf('Take Photo') === -1) return;
-                panel.querySelectorAll('input[type="file"]').forEach(function(inp) {
+            doc.querySelectorAll('label').forEach(function(lbl) {
+                var txt = lbl.innerText || lbl.textContent || '';
+                if (txt.indexOf('open camera') === -1) return;
+                var container = lbl.closest('[data-testid="stFileUploader"]');
+                if (!container) return;
+                container.querySelectorAll('input[type="file"]').forEach(function(inp) {
                     inp.setAttribute('capture', 'environment');
+                    inp.setAttribute('accept', 'image/*');
                 });
             });
         } catch(e) {}
     }
     applyCapture();
     new MutationObserver(applyCapture).observe(
-        window.parent.document.body,
-        {childList: true, subtree: true}
+        window.parent.document.body, {childList: true, subtree: true}
     );
 })();
 </script>
 """, height=0, scrolling=False)
+
+# Mobile photo picker CSS
+st.markdown("""
+<style>
+div[data-testid="stButton"] button[kind="secondary"].photo-choice {
+    height: 80px; font-size: 1rem; border-radius: 12px;
+}
+.photo-section-header {
+    font-size: .82rem; font-weight: 700; color: #6b7280;
+    text-transform: uppercase; letter-spacing: .06em; margin: 6px 0 4px;
+}
+.photo-thumb-wrap { position: relative; display: inline-block; }
+</style>
+""", unsafe_allow_html=True)
 
 stores = get_accessible_stores(user['id'])
 store_names = [s['store_name'] for s in stores]
@@ -146,68 +157,138 @@ def _remove_ac():
             st.session_state.pop(f"{k}_{idx}", None)
         for photo_base in ['img_ac', 'img_serial', 'img_remote']:
             pk = f"{photo_base}_{idx}"
-            for pfx in ['cam_confirmed_', 'cam_active_', 'cam_counter_', 'up_']:
+            for pfx in ['_mode_', '_confirm_', '_src_', '_cnt_']:
                 st.session_state.pop(f"{pfx}{pk}", None)
         st.session_state.ac_count -= 1
 
 
 def _photo_field(label, key, allow_video=False):
-    """Take Photo tab: tapping opens native full-screen camera app on mobile (via capture=environment).
-       Upload File tab: pick existing photo/video from gallery."""
+    """
+    Mobile photo picker:
+      [📎 Upload / Take Photo]
+        → 📁 Upload from Device  |  📷 Take Photo
+      Upload flow   : pick file → Save → shown in Uploaded section
+      Camera flow   : tap to open camera → preview → Retake | ✔ Confirm → shown in Captured section
+    """
     st.markdown(f"**{label}**")
 
-    confirmed_key = f"cam_confirmed_{key}"
-    counter_key   = f"cam_counter_{key}"
-    if counter_key not in st.session_state:
-        st.session_state[counter_key] = 0
+    mode_key    = f"_mode_{key}"
+    confirm_key = f"_confirm_{key}"
+    src_key     = f"_src_{key}"
+    cnt_key     = f"_cnt_{key}"
 
-    t_cam, t_up = st.tabs(["📷 Take Photo", "📁 Upload File"])
+    for k, v in [(mode_key, None), (confirm_key, None), (src_key, None), (cnt_key, 0)]:
+        if k not in st.session_state:
+            st.session_state[k] = v
 
-    with t_cam:
-        confirmed = st.session_state.get(confirmed_key)
+    mode    = st.session_state[mode_key]
+    confirm = st.session_state[confirm_key]
+    src     = st.session_state[src_key]
+    cnt     = st.session_state[cnt_key]
 
-        if confirmed:
-            st.image(confirmed, width=220)
-            if st.button("🔄 Retake", key=f"retake_{key}", use_container_width=True):
-                st.session_state[confirmed_key] = None
-                st.session_state[counter_key]  += 1
+    # ── State: confirmed photo already saved ──────────────────────────────────
+    if mode is None and confirm is not None:
+        badge = "📷 Captured Photo" if src == "cam" else "📤 Uploaded Photo"
+        st.markdown(f'<div class="photo-section-header">{badge}</div>', unsafe_allow_html=True)
+        st.image(confirm, width=220)
+        if st.button("🔄 Replace", key=f"replace_{key}", use_container_width=True):
+            st.session_state[confirm_key] = None
+            st.session_state[src_key]     = None
+            st.session_state[mode_key]    = "choice"
+            st.rerun()
+        return
+
+    # ── State: no photo yet → show main button ────────────────────────────────
+    if mode is None:
+        if st.button("📎  Upload / Take Photo", key=f"add_{key}", use_container_width=True):
+            st.session_state[mode_key] = "choice"
+            st.rerun()
+        return
+
+    # ── State: choice screen ──────────────────────────────────────────────────
+    if mode == "choice":
+        st.markdown("**Choose an option**")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("📁\n\nUpload from Device",
+                         key=f"go_up_{key}", use_container_width=True,
+                         help="Pick from gallery or files"):
+                st.session_state[mode_key] = "upload"
                 st.rerun()
-        else:
-            # JS adds capture=environment to this input → opens native camera app on mobile
-            cam_file = st.file_uploader(
-                "📷 Tap here to open camera",
-                type=['jpg', 'jpeg', 'png', 'webp'],
-                key=f"cam_{key}_{st.session_state[counter_key]}",
-            )
-            if cam_file:
-                st.image(cam_file, width=220)
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("🔄 Retake", key=f"retake_live_{key}", use_container_width=True):
-                        st.session_state[counter_key] += 1
-                        st.rerun()
-                with c2:
-                    if st.button("✅ OK — Save Photo", key=f"ok_{key}",
-                                 type="primary", use_container_width=True):
-                        st.session_state[confirmed_key] = cam_file
-                        st.rerun()
+        with c2:
+            if st.button("📷\n\nTake Photo",
+                         key=f"go_cam_{key}", use_container_width=True, type="primary",
+                         help="Open native camera app"):
+                st.session_state[mode_key] = "camera"
+                st.rerun()
+        if st.button("✕ Cancel", key=f"cancel_{key}"):
+            st.session_state[mode_key] = None
+            st.rerun()
+        return
 
-    with t_up:
+    # ── State: upload from device ─────────────────────────────────────────────
+    if mode == "upload":
         types = ['jpg', 'jpeg', 'png', 'webp']
         if allow_video:
             types += ['mp4', 'mov', 'pdf']
-        st.file_uploader("", type=types, key=f"up_{key}", label_visibility="collapsed")
-        f = st.session_state.get(f"up_{key}")
+        f = st.file_uploader("Select from device", type=types,
+                             key=f"upf_{key}_{cnt}")
         if f:
             if hasattr(f, 'type') and f.type.startswith('image'):
-                st.image(f, width=180)
+                st.image(f, use_container_width=True)
             else:
                 st.success(f"✅ {f.name}")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✕ Cancel", key=f"up_cancel_{key}", use_container_width=True):
+                    st.session_state[cnt_key] += 1
+                    st.session_state[mode_key] = None
+                    st.rerun()
+            with c2:
+                if st.button("✅ Save", key=f"up_save_{key}",
+                             type="primary", use_container_width=True):
+                    st.session_state[confirm_key] = f
+                    st.session_state[src_key]     = "upload"
+                    st.session_state[cnt_key]    += 1
+                    st.session_state[mode_key]    = None
+                    st.rerun()
+        else:
+            if st.button("✕ Cancel", key=f"up_cancel_e_{key}"):
+                st.session_state[mode_key] = None
+                st.rerun()
+        return
+
+    # ── State: camera ─────────────────────────────────────────────────────────
+    if mode == "camera":
+        # JS adds capture=environment based on the label text "open camera"
+        f = st.file_uploader("📷 Tap here to open camera",
+                             type=['jpg', 'jpeg', 'png', 'webp'],
+                             key=f"camf_{key}_{cnt}")
+        if f:
+            st.markdown("**Preview**")
+            st.image(f, use_container_width=True)
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("🔄 Retake", key=f"retake_{key}", use_container_width=True):
+                    st.session_state[cnt_key] += 1
+                    st.rerun()
+            with c2:
+                if st.button("✔ Confirm", key=f"confirm_{key}",
+                             type="primary", use_container_width=True):
+                    st.session_state[confirm_key] = f
+                    st.session_state[src_key]     = "cam"
+                    st.session_state[cnt_key]    += 1
+                    st.session_state[mode_key]    = None
+                    st.rerun()
+        else:
+            if st.button("✕ Cancel", key=f"cam_cancel_{key}"):
+                st.session_state[mode_key] = None
+                st.rerun()
 
 
 def _get_photo(key):
-    """Return confirmed camera photo or uploaded file."""
-    return st.session_state.get(f"cam_confirmed_{key}") or st.session_state.get(f"up_{key}")
+    """Return confirmed photo (camera or upload)."""
+    return st.session_state.get(f"_confirm_{key}")
 
 
 def save_image(file_obj, store, d, label, suffix):
@@ -545,7 +626,7 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
             else:
                 st.error(f"📊 Google Sheet save failed: {sh_msg}")
 
-            # Reset form
+            # Reset form — clear all widget + photo picker state
             st.session_state.ac_count = 1
             photo_keys = ['img_ac', 'img_serial', 'img_remote']
             other_keys = ['ac_num', 'serial', 'cap',
@@ -556,15 +637,16 @@ if st.button("✅ Submit PMS Entry", type="primary", use_container_width=True):
                           'perf_inlet', 'perf_outlet',
                           'issue_obs', 'issue_action', 'issue_parts',
                           'rem_condition', 'rem_notes']
+            photo_pfx = ['_mode_', '_confirm_', '_src_', '_cnt_']
             for i in range(50):
                 for k in other_keys:
                     st.session_state.pop(f"{k}_{i}", None)
                 for k in photo_keys:
                     pk = f"{k}_{i}"
-                    for pfx in ['cam_confirmed_', 'cam_active_', 'cam_counter_', 'up_']:
+                    for pfx in photo_pfx:
                         st.session_state.pop(f"{pfx}{pk}", None)
             for k in ['sess_air_filter', 'sess_drain_tray', 'sess_grill_temp', 'sess_fsr_report']:
-                for pfx in ['cam_confirmed_', 'cam_active_', 'cam_counter_', 'up_']:
+                for pfx in photo_pfx:
                     st.session_state.pop(f"{pfx}{k}", None)
             for k in ['fr_tech_remarks', 'fr_cust_signature', 'fr_cust_empcode',
                       'fr_feedback', 'fr_complaint']:
