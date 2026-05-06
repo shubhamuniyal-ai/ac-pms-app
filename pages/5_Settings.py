@@ -173,7 +173,7 @@ with tab0:
 
 # ── Tab 1: Store Master ────────────────────────────────────────────────────────
 with tab1:
-    subtab_add, subtab_bulk, subtab_list = st.tabs(["Add Store", "Bulk Upload", "Store List"])
+    subtab_add, subtab_bulk, subtab_list, subtab_del = st.tabs(["Add Store", "Bulk Upload", "Store List", "🗑️ Delete All"])
 
     with subtab_add:
         col1, col2 = st.columns(2)
@@ -256,6 +256,22 @@ with tab1:
                             delete_store(s['id'])
                             st.success(f"Deleted '{s['store_name']}'")
                             st.rerun()
+
+
+    with subtab_del:
+        st.subheader("Delete All Stores")
+        stores_all = get_stores()
+        if not stores_all:
+            st.info("No stores in the database.")
+        else:
+            st.warning(f"This will permanently delete all **{len(stores_all)} stores**. This cannot be undone.")
+            confirm_del = st.text_input("Type **DELETE ALL** to confirm", placeholder="DELETE ALL")
+            if st.button("🗑️ Delete All Stores", type="primary",
+                         disabled=(confirm_del != "DELETE ALL")):
+                for s in stores_all:
+                    delete_store(s['id'])
+                st.success(f"All {len(stores_all)} stores deleted.")
+                st.rerun()
 
 
 # ── Tab 2: AC Types ────────────────────────────────────────────────────────────
