@@ -46,31 +46,47 @@ st.markdown("""
 
 # ── Session state init ─────────────────────────────────────────────────────────
 if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.user      = None
-    st.session_state.login_date = None
+    st.session_state.logged_in    = False
+    st.session_state.user         = None
+    st.session_state.login_date   = None
+    st.session_state.session_token = None
 
-# ── Auto-login via session token in URL ───────────────────────────────────────
+# ── Auto-login via session token (URL or session_state) ───────────────────────
 if not st.session_state.logged_in:
-    s_token = st.query_params.get('s', '')
+    # Check URL param first, then fall back to nothing (session_state already cleared)
+    s_token = st.query_params.get('s', '') or st.session_state.get('session_token', '')
     if s_token:
         restored = verify_session_token(s_token)
         if restored:
-            st.session_state.logged_in  = True
-            st.session_state.user       = restored
-            st.session_state.login_date = date.today().isoformat()
+            st.session_state.logged_in     = True
+            st.session_state.user          = restored
+            st.session_state.login_date    = date.today().isoformat()
+            st.session_state.session_token = s_token
 
-# ── Midnight logout — session expires at end of day ───────────────────────────
+# ── Always keep token in URL so page refresh works ────────────────────────────
+if st.session_state.logged_in and st.session_state.get('session_token'):
+    tok = st.session_state.session_token
+    try:
+        if st.query_params.get('s', '') != tok:
+            st.query_params['s'] = tok
+    except Exception:
+        pass
+
+# ── End-of-day logout (11 PM) — does not fire during normal working hours ─────
 if st.session_state.logged_in:
-    today_str = date.today().isoformat()
-    if st.session_state.get('login_date') and st.session_state.login_date != today_str:
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
-        try:
-            st.query_params.clear()
-        except Exception:
-            pass
-        st.rerun()
+    from datetime import datetime as _dt
+    now = _dt.now()
+    # Logout only between 11 PM and 6 AM (outside normal working hours)
+    if now.hour >= 23 or now.hour < 6:
+        login_date = st.session_state.get('login_date')
+        if login_date and login_date != date.today().isoformat():
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            try:
+                st.query_params.clear()
+            except Exception:
+                pass
+            st.rerun()
 
 
 # ── Password setup flow (via invite link) ──────────────────────────────────────
@@ -124,11 +140,11 @@ def login_view():
             if identifier and password:
                 user = authenticate(identifier, password)
                 if user:
-                    st.session_state.logged_in  = True
-                    st.session_state.user       = user
-                    st.session_state.login_date = date.today().isoformat()
-                    # Create session token — persists session across WebSocket reconnects
                     token = create_session_token(user['id'])
+                    st.session_state.logged_in     = True
+                    st.session_state.user          = user
+                    st.session_state.login_date    = date.today().isoformat()
+                    st.session_state.session_token = token
                     try:
                         st.query_params['s'] = token
                     except Exception:

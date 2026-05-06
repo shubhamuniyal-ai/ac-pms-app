@@ -229,12 +229,13 @@ def _migrate(conn):
 # ── Session tokens (for persistent login) ─────────────────────────────────────
 
 def create_session_token(user_id):
-    """Create a session token valid until midnight."""
-    token  = secrets.token_urlsafe(32)
-    midnight = datetime.now().replace(hour=23, minute=59, second=59)
+    """Create a session token valid until 6 AM next day (covers full work day + night)."""
+    token   = secrets.token_urlsafe(32)
+    expiry  = (datetime.now().replace(hour=6, minute=0, second=0) +
+               timedelta(days=1))
     conn = get_conn()
     conn.execute("UPDATE users SET session_token=?, session_expiry=? WHERE id=?",
-                 (token, midnight.isoformat(), user_id))
+                 (token, expiry.isoformat(), user_id))
     conn.commit(); conn.close()
     return token
 
