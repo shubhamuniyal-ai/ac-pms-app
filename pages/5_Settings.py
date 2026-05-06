@@ -198,7 +198,19 @@ with tab1:
         up = st.file_uploader("Upload File", type=['xlsx', 'xls', 'csv'])
         if up:
             try:
-                df = pd.read_csv(up) if up.name.endswith('.csv') else pd.read_excel(up)
+                if up.name.endswith('.csv'):
+                    raw = up.read()
+                    for enc in ('utf-8', 'cp1252', 'latin-1', 'utf-8-sig'):
+                        try:
+                            df = pd.read_csv(__import__('io').BytesIO(raw), encoding=enc)
+                            break
+                        except (UnicodeDecodeError, Exception):
+                            continue
+                    else:
+                        st.error("Could not read CSV. Try saving the file as UTF-8 CSV from Excel.")
+                        st.stop()
+                else:
+                    df = pd.read_excel(up)
                 df.columns = df.columns.str.strip()
                 required = {'Store Name', 'State', 'Total AC'}
                 if not required.issubset(set(df.columns)):
