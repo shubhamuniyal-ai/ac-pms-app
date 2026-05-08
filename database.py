@@ -202,6 +202,7 @@ def _migrate(conn):
         _add_cols("pms_sessions", ps_new)
         _add_cols("ac_entries", ae_new)
         _add_cols("users", us_new)
+        _add_cols("stores", [("brand", "TEXT DEFAULT ''")])   # brand per store
 
         # Old schema rebuild (Technician → Vendor)
         r = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
@@ -360,11 +361,11 @@ def get_states():
     return [dict(r)["state"] for r in rows]
 
 
-def add_store(store_name, state, total_ac):
+def add_store(store_name, state, total_ac, brand=''):
     conn = get_conn()
     try:
-        conn.execute("INSERT INTO stores(store_name,state,total_ac) VALUES(?,?,?)",
-                     (store_name, state, int(total_ac)))
+        conn.execute("INSERT INTO stores(store_name,state,total_ac,brand) VALUES(?,?,?,?)",
+                     (store_name, state, int(total_ac), brand or ''))
         conn.commit()
         return True, "Store added successfully"
     except Exception:
@@ -373,11 +374,11 @@ def add_store(store_name, state, total_ac):
         conn.close()
 
 
-def update_store(store_id, store_name, state, total_ac):
+def update_store(store_id, store_name, state, total_ac, brand=''):
     conn = get_conn()
     try:
-        conn.execute("UPDATE stores SET store_name=?, state=?, total_ac=? WHERE id=?",
-                     (store_name, state, int(total_ac), store_id))
+        conn.execute("UPDATE stores SET store_name=?, state=?, total_ac=?, brand=? WHERE id=?",
+                     (store_name, state, int(total_ac), brand or '', store_id))
         conn.commit()
         return True, "Store updated"
     except Exception:

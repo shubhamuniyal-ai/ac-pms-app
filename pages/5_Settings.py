@@ -178,21 +178,23 @@ with tab1:
     with subtab_add:
         col1, col2 = st.columns(2)
         with col1:
-            sname  = st.text_input("Store Name *")
-            sstate = st.text_input("State *")
-            stac   = st.number_input("Total AC Count *", min_value=0, value=0)
-            if st.button("Add Store", type="primary"):
-                if sname.strip() and sstate.strip():
-                    ok, msg = add_store(sname.strip(), sstate.strip(), stac)
-                    st.success(msg) if ok else st.error(msg)
-                    if ok:
-                        st.rerun()
-                else:
-                    st.warning("Store Name and State are required.")
+            sname   = st.text_input("Store Name *")
+            sstate  = st.text_input("State *")
+        with col2:
+            stac    = st.number_input("Total AC Count *", min_value=0, value=0)
+            sbrand  = st.text_input("AC Brand", placeholder="e.g. Daikin, Voltas, Blue Star")
+        if st.button("Add Store", type="primary"):
+            if sname.strip() and sstate.strip():
+                ok, msg = add_store(sname.strip(), sstate.strip(), stac, sbrand.strip())
+                st.success(msg) if ok else st.error(msg)
+                if ok:
+                    st.rerun()
+            else:
+                st.warning("Store Name and State are required.")
 
     with subtab_bulk:
-        st.markdown("Upload Excel/CSV with columns: **Store Name**, **State**, **Total AC**")
-        tmpl = pd.DataFrame(columns=['Store Name', 'State', 'Total AC'])
+        st.markdown("Upload Excel/CSV with columns: **Store Name**, **State**, **Total AC**, **Brand** (optional)")
+        tmpl = pd.DataFrame(columns=['Store Name', 'State', 'Total AC', 'Brand'])
         st.download_button("📥 Download Template", tmpl.to_csv(index=False),
                            "store_template.csv", "text/csv")
         up = st.file_uploader("Upload File", type=['xlsx', 'xls', 'csv'])
@@ -218,12 +220,17 @@ with tab1:
                 else:
                     df = df.dropna(subset=['Store Name', 'State'])
                     df['Total AC'] = pd.to_numeric(df['Total AC'], errors='coerce').fillna(0).astype(int)
+                    if 'Brand' not in df.columns:
+                        df['Brand'] = ''
+                    df['Brand'] = df['Brand'].fillna('').astype(str)
                     st.dataframe(df.head(20), use_container_width=True)
                     if st.button("Import Stores", type="primary"):
                         added = skipped = 0
                         for _, row in df.iterrows():
                             ok, _ = add_store(str(row['Store Name']).strip(),
-                                              str(row['State']).strip(), int(row['Total AC']))
+                                              str(row['State']).strip(),
+                                              int(row['Total AC']),
+                                              str(row.get('Brand', '')).strip())
                             if ok: added += 1
                             else:  skipped += 1
                         st.success(f"Imported: **{added}** stores | Skipped (duplicates): **{skipped}**")
@@ -238,18 +245,18 @@ with tab1:
         else:
             st.write(f"**{len(stores)} stores in master**")
             for s in stores:
-                with st.expander(f"🏪 {s['store_name']} — {s['state']} ({s['total_ac']} ACs)"):
+                with st.expander(f"🏪 {s['store_name']} — {s['state']} ({s['total_ac']} ACs)  {s.get('brand','') or ''}"):
                     c1, c2 = st.columns([3, 1])
                     with c1:
-                        n_name  = st.text_input("Store Name", value=s['store_name'], key=f"sn_{s['id']}")
-                        n_state = st.text_input("State",      value=s['state'],      key=f"ss_{s['id']}")
-                        n_tac   = st.number_input("Total AC", value=s['total_ac'],   key=f"st_{s['id']}",
-                                                  min_value=0)
+                        n_name  = st.text_input("Store Name", value=s['store_name'],    key=f"sn_{s['id']}")
+                        n_state = st.text_input("State",      value=s['state'],          key=f"ss_{s['id']}")
+                        n_tac   = st.number_input("Total AC", value=s['total_ac'],       key=f"st_{s['id']}", min_value=0)
+                        n_brand = st.text_input("AC Brand",   value=s.get('brand', ''), key=f"sb_{s['id']}")
                     with c2:
                         st.write("")
                         st.write("")
                         if st.button("💾 Save", key=f"sv_{s['id']}"):
-                            ok, msg = update_store(s['id'], n_name, n_state, n_tac)
+                            ok, msg = update_store(s['id'], n_name, n_state, n_tac, n_brand)
                             st.success(msg) if ok else st.error(msg)
                             if ok: st.rerun()
                         if st.button("🗑️ Delete", key=f"dl_{s['id']}"):

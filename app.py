@@ -155,7 +155,7 @@ def login_view():
             else:
                 st.warning("Please enter your email/mobile and password.")
 
-        st.caption("Default Admin — Email: **admin@pms.local** | Password: **admin123**")
+        st.caption("Contact your administrator if you need login access.")
 
 
 # ── Route: setup token → login → app ──────────────────────────────────────────

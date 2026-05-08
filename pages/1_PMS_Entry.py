@@ -94,7 +94,6 @@ else:
 
 tech_names = [t['name'] for t in tech_pool]
 ac_types   = get_ac_types()
-brands     = get_brands()
 
 if not store_names:
     st.warning("No stores assigned to your account. Ask Admin to assign stores.")
@@ -113,17 +112,17 @@ with col2:
 with col3:
     entry_date = st.date_input("Date *", value=date.today())
 
-store_info = get_store_by_name(selected_store)
+store_info   = get_store_by_name(selected_store)
+selected_brand = (store_info.get('brand') or '') if store_info else ''
+
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.text_input("State", value=store_info['state'] if store_info else "", disabled=True)
+    st.text_input("State",    value=store_info['state']    if store_info else "", disabled=True)
 with col2:
     st.number_input("Total AC", value=store_info['total_ac'] if store_info else 0,
                     disabled=True, min_value=0)
 with col3:
-    brand_opts = [""] + brands
-    selected_brand = st.selectbox("AC Brand *", brand_opts,
-                                  format_func=lambda x: "— Select Brand —" if x == "" else x)
+    st.text_input("AC Brand", value=selected_brand or "— not set —", disabled=True)
 with col4:
     if user['role'] == 'Vendor':
         st.text_input("Technician", value=user['name'], disabled=True)
@@ -186,56 +185,68 @@ def _photo_field(label, key, allow_video=False):
     src     = st.session_state[src_key]
     cnt     = st.session_state[cnt_key]
 
-    # ── State: confirmed photo already saved ──────────────────────────────────
-    if mode is None and confirm is not None:
-        badge = "📷 Captured Photo" if src == "cam" else "📤 Uploaded Photo"
-        st.markdown(f'<div class="photo-section-header">{badge}</div>', unsafe_allow_html=True)
+    # ── Confirmed photo — show with Replace button ────────────────────────────
+    if confirm is not None:
+        badge = "📷 Captured" if src == "cam" else "📤 Uploaded"
+        st.caption(badge)
         st.image(confirm, width=220)
         if st.button("🔄 Replace", key=f"replace_{key}", use_container_width=True):
             st.session_state[confirm_key] = None
             st.session_state[src_key]     = None
-            st.session_state[mode_key]    = "choice"
+            st.session_state[mode_key]    = None
+            st.session_state[cnt_key]    += 1
             st.rerun()
         return
 
-    # ── State: no photo yet → show main button ────────────────────────────────
+    # ── No photo yet → two direct buttons ────────────────────────────────────
     if mode is None:
-        if st.button("📎  Upload / Take Photo", key=f"add_{key}", use_container_width=True):
-            st.session_state[mode_key] = "choice"
-            st.rerun()
-        return
-
-    # ── State: choice screen ──────────────────────────────────────────────────
-    if mode == "choice":
-        st.markdown("**Choose an option**")
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("📁\n\nUpload from Device",
-                         key=f"go_up_{key}", use_container_width=True,
-                         help="Pick from gallery or files"):
-                st.session_state[mode_key] = "upload"
-                st.rerun()
-        with c2:
-            if st.button("📷\n\nTake Photo",
-                         key=f"go_cam_{key}", use_container_width=True, type="primary",
-                         help="Open native camera app"):
+            if st.button("📷 Take Photo", key=f"go_cam_{key}",
+                         use_container_width=True, type="primary"):
                 st.session_state[mode_key] = "camera"
                 st.rerun()
-        if st.button("✕ Cancel", key=f"cancel_{key}"):
-            st.session_state[mode_key] = None
-            st.rerun()
+        with c2:
+            if st.button("📁 Upload", key=f"go_up_{key}", use_container_width=True):
+                st.session_state[mode_key] = "upload"
+                st.rerun()
         return
 
-    # ── State: upload from device ─────────────────────────────────────────────
+    # ── Camera — opens native camera on mobile (JS adds capture=environment) ─
+    if mode == "camera":
+        f = st.file_uploader("📷 Tap here to open camera",
+                             type=['jpg', 'jpeg', 'png', 'webp'],
+                             key=f"camf_{key}_{cnt}")
+        if f:
+            st.image(f, width=220)
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("🔄 Retake", key=f"retake_{key}", use_container_width=True):
+                    st.session_state[cnt_key] += 1
+                    st.rerun()
+            with c2:
+                if st.button("✔ Confirm", key=f"confirm_{key}",
+                             type="primary", use_container_width=True):
+                    st.session_state[confirm_key] = f
+                    st.session_state[src_key]     = "cam"
+                    st.session_state[cnt_key]    += 1
+                    st.session_state[mode_key]    = None
+                    st.rerun()
+        else:
+            if st.button("✕ Cancel", key=f"cam_cancel_{key}"):
+                st.session_state[mode_key] = None
+                st.rerun()
+        return
+
+    # ── Upload from device / gallery ─────────────────────────────────────────
     if mode == "upload":
         types = ['jpg', 'jpeg', 'png', 'webp']
         if allow_video:
             types += ['mp4', 'mov', 'pdf']
-        f = st.file_uploader("Select from device", type=types,
-                             key=f"upf_{key}_{cnt}")
+        f = st.file_uploader("Select file", type=types, key=f"upf_{key}_{cnt}")
         if f:
             if hasattr(f, 'type') and f.type.startswith('image'):
-                st.image(f, use_container_width=True)
+                st.image(f, width=220)
             else:
                 st.success(f"✅ {f.name}")
             c1, c2 = st.columns(2)
@@ -254,34 +265,6 @@ def _photo_field(label, key, allow_video=False):
                     st.rerun()
         else:
             if st.button("✕ Cancel", key=f"up_cancel_e_{key}"):
-                st.session_state[mode_key] = None
-                st.rerun()
-        return
-
-    # ── State: camera ─────────────────────────────────────────────────────────
-    if mode == "camera":
-        # JS adds capture=environment based on the label text "open camera"
-        f = st.file_uploader("📷 Tap here to open camera",
-                             type=['jpg', 'jpeg', 'png', 'webp'],
-                             key=f"camf_{key}_{cnt}")
-        if f:
-            st.markdown("**Preview**")
-            st.image(f, use_container_width=True)
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("🔄 Retake", key=f"retake_{key}", use_container_width=True):
-                    st.session_state[cnt_key] += 1
-                    st.rerun()
-            with c2:
-                if st.button("✔ Confirm", key=f"confirm_{key}",
-                             type="primary", use_container_width=True):
-                    st.session_state[confirm_key] = f
-                    st.session_state[src_key]     = "cam"
-                    st.session_state[cnt_key]    += 1
-                    st.session_state[mode_key]    = None
-                    st.rerun()
-        else:
-            if st.button("✕ Cancel", key=f"cam_cancel_{key}"):
                 st.session_state[mode_key] = None
                 st.rerun()
 
