@@ -11,10 +11,6 @@ Setup (one time, 3 minutes):
 """
 import json, os, requests as _requests
 
-_BASE     = os.path.dirname(os.path.abspath(__file__))
-_DATA_DIR = os.path.join(_BASE, "data")
-_CFG_FILE = os.path.join(_DATA_DIR, "sheets_config.json")
-
 DEFAULT_SHEET_ID = "1HIFQU7keY70wWiwlo7R_wT8nAB3UdOQM-tLPEQqowJE"
 
 # ── Apps Script to paste into the Google Sheet ─────────────────────────────────
@@ -63,24 +59,23 @@ STORE_HEADERS  = ["Store Name", "State", "Total AC"]
 BRAND_HEADERS  = ["Brand Name"]
 
 
-# ── Config helpers ─────────────────────────────────────────────────────────────
+# ── Config helpers — stored in database so data survives redeployments ─────────
 
 def get_config():
     try:
-        with open(_CFG_FILE) as f:
-            return json.load(f)
+        from database import get_sheets_config
+        cfg = get_sheets_config()
+        return cfg if cfg else {"sheet_id": DEFAULT_SHEET_ID, "webapp_url": ""}
     except Exception:
         return {"sheet_id": DEFAULT_SHEET_ID, "webapp_url": ""}
 
 
 def save_config(webapp_url, sheet_id=None):
-    os.makedirs(_DATA_DIR, exist_ok=True)
-    cfg = get_config()
-    cfg["webapp_url"] = webapp_url.strip()
-    if sheet_id:
-        cfg["sheet_id"] = sheet_id.strip()
-    with open(_CFG_FILE, "w") as f:
-        json.dump(cfg, f)
+    try:
+        from database import save_sheets_config
+        save_sheets_config(webapp_url.strip())
+    except Exception:
+        pass
 
 
 def is_configured():

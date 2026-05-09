@@ -130,7 +130,8 @@ def init_db():
             id INTEGER PRIMARY KEY, smtp_host TEXT DEFAULT 'smtp.gmail.com',
             smtp_port INTEGER DEFAULT 587, smtp_user TEXT DEFAULT '',
             smtp_password TEXT DEFAULT '', sender_name TEXT DEFAULT 'AC PMS System',
-            app_url TEXT DEFAULT 'http://localhost:8501', apk_url TEXT DEFAULT ''
+            app_url TEXT DEFAULT 'http://localhost:8501', apk_url TEXT DEFAULT '',
+            sheets_webapp_url TEXT DEFAULT ''
         )
     """)
     conn.commit()
@@ -224,6 +225,8 @@ def _migrate(conn):
         ecols = {r[1] for r in conn.execute("PRAGMA table_info(email_config)").fetchall()}
         if "apk_url" not in ecols:
             conn.execute("ALTER TABLE email_config ADD COLUMN apk_url TEXT DEFAULT ''")
+        if "sheets_webapp_url" not in ecols:
+            conn.execute("ALTER TABLE email_config ADD COLUMN sheets_webapp_url TEXT DEFAULT ''")
         conn.commit()
 
 
@@ -816,6 +819,21 @@ def get_email_config():
     row = conn.execute("SELECT * FROM email_config WHERE id=1").fetchone()
     conn.close()
     return dict(row) if row else {}
+
+
+def get_sheets_config():
+    """Return Google Sheets config stored in the database (survives redeployments)."""
+    cfg = get_email_config()
+    url = cfg.get('sheets_webapp_url', '') or ''
+    return {'webapp_url': url} if url else {}
+
+
+def save_sheets_config(webapp_url):
+    """Persist Google Sheets Apps Script URL in the database."""
+    conn = get_conn()
+    conn.execute("UPDATE email_config SET sheets_webapp_url=? WHERE id=1",
+                 (webapp_url.strip(),))
+    conn.commit(); conn.close()
 
 
 def update_email_config(smtp_host, smtp_port, smtp_user, smtp_password, sender_name, app_url, apk_url=""):
